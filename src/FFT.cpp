@@ -46,18 +46,16 @@
 #include <stdio.h>
 #include <math.h>
 
+#include "RealFFTf.h"
 #include "Experimental.h"
 
 static int **gFFTBitTable = NULL;
-static const int MaxFastBits = 16;
+static const size_t MaxFastBits = 16;
 
 /* Declare Static functions */
-static int IsPowerOfTwo(int x);
-static int NumberOfBitsNeeded(int PowerOfTwo);
-static int ReverseBits(int index, int NumBits);
 static void InitFFT();
 
-int IsPowerOfTwo(int x)
+static bool IsPowerOfTwo(size_t x)
 {
    if (x < 2)
       return false;
@@ -68,23 +66,23 @@ int IsPowerOfTwo(int x)
    return true;
 }
 
-int NumberOfBitsNeeded(int PowerOfTwo)
+static size_t NumberOfBitsNeeded(size_t PowerOfTwo)
 {
-   int i;
-
    if (PowerOfTwo < 2) {
-      fprintf(stderr, "Error: FFT called with size %d\n", PowerOfTwo);
+      fprintf(stderr, "Error: FFT called with size %ld\n", PowerOfTwo);
       exit(1);
    }
 
-   for (i = 0;; i++)
-      if (PowerOfTwo & (1 << i))
-         return i;
+   size_t i = 0;
+   while (PowerOfTwo > 1)
+      PowerOfTwo >>= 1, ++i;
+
+   return i;
 }
 
-int ReverseBits(int index, int NumBits)
+int ReverseBits(size_t index, size_t NumBits)
 {
-   int i, rev;
+   size_t i, rev;
 
    for (i = rev = 0; i < NumBits; i++) {
       rev = (rev << 1) | (index & 1);
@@ -98,37 +96,31 @@ void InitFFT()
 {
    gFFTBitTable = new int *[MaxFastBits];
 
-   int len = 2;
-   for (int b = 1; b <= MaxFastBits; b++) {
+   size_t len = 2;
+   for (size_t b = 1; b <= MaxFastBits; b++) {
 
       gFFTBitTable[b - 1] = new int[len];
 
-      for (int i = 0; i < len; i++)
+      for (size_t i = 0; i < len; i++)
          gFFTBitTable[b - 1][i] = ReverseBits(i, b);
 
       len <<= 1;
    }
 }
 
-#ifdef EXPERIMENTAL_USE_REALFFTF
-#include "RealFFTf.h"
-#endif
-
 void DeinitFFT()
 {
    if (gFFTBitTable) {
-      for (int b = 1; b <= MaxFastBits; b++) {
+      for (size_t b = 1; b <= MaxFastBits; b++) {
          delete[] gFFTBitTable[b-1];
       }
       delete[] gFFTBitTable;
    }
-#ifdef EXPERIMENTAL_USE_REALFFTF
    // Deallocate any unused RealFFTf tables
    CleanupFFT();
-#endif
 }
 
-inline int FastReverseBits(int i, int NumBits)
+static inline size_t FastReverseBits(size_t i, size_t NumBits)
 {
    if (NumBits <= MaxFastBits)
       return gFFTBitTable[NumBits - 1][i];
@@ -140,19 +132,16 @@ inline int FastReverseBits(int i, int NumBits)
  * Complex Fast Fourier Transform
  */
 
-void FFT(int NumSamples,
+void FFT(size_t NumSamples,
          bool InverseTransform,
-         float *RealIn, float *ImagIn, float *RealOut, float *ImagOut)
+         const float *RealIn, const float *ImagIn,
+	 float *RealOut, float *ImagOut)
 {
-   int NumBits;                 /* Number of bits needed to store indices */
-   int i, j, k, n;
-   int BlockSize, BlockEnd;
-
    double angle_numerator = 2.0 * M_PI;
    double tr, ti;                /* temp real, temp imaginary */
 
    if (!IsPowerOfTwo(NumSamples)) {
-      fprintf(stderr, "%d is not a power of two\n", NumSamples);
+      fprintf(stderr, "%ld is not a power of two\n", NumSamples);
       exit(1);
    }
 
@@ -162,14 +151,15 @@ void FFT(int NumSamples,
    if (!InverseTransform)
       angle_numerator = -angle_numerator;
 
-   NumBits = NumberOfBitsNeeded(NumSamples);
+   /* Number of bits needed to store indices */
+   auto NumBits = NumberOfBitsNeeded(NumSamples);
 
    /*
     **   Do simultaneous data copy and bit-reversal ordering into outputs...
     */
 
-   for (i = 0; i < NumSamples; i++) {
-      j = FastReverseBits(i, NumBits);
+   for (size_t i = 0; i < NumSamples; i++) {
+      auto j = FastReverseBits(i, NumBits);
       RealOut[j] = RealIn[i];
       ImagOut[j] = (ImagIn == NULL) ? 0.0 : ImagIn[i];
    }
@@ -178,8 +168,8 @@ void FFT(int NumSamples,
     **   Do the FFT itself...
     */
 
-   BlockEnd = 1;
-   for (BlockSize = 2; BlockSize <= NumSamples; BlockSize <<= 1) {
+   size_t BlockEnd = 1;
+   for (size_t BlockSize = 2; BlockSize <= NumSamples; BlockSize <<= 1) {
 
       double delta_angle = angle_numerator / (double) BlockSize;
 
@@ -190,14 +180,14 @@ void FFT(int NumSamples,
       double w = 2 * cm1;
       double ar0, ar1, ar2, ai0, ai1, ai2;
 
-      for (i = 0; i < NumSamples; i += BlockSize) {
+      for (size_t i = 0; i < NumSamples; i += BlockSize) {
          ar2 = cm2;
          ar1 = cm1;
 
          ai2 = sm2;
          ai1 = sm1;
 
-         for (j = i, n = 0; n < BlockEnd; j++, n++) {
+         for (size_t j = i, n = 0; n < BlockEnd; j++, n++) {
             ar0 = w * ar1 - ar2;
             ar2 = ar1;
             ar1 = ar0;
@@ -206,7 +196,7 @@ void FFT(int NumSamples,
             ai2 = ai1;
             ai1 = ai0;
 
-            k = j + BlockEnd;
+            size_t k = j + BlockEnd;
             tr = ar0 * RealOut[k] - ai0 * ImagOut[k];
             ti = ar0 * ImagOut[k] + ai0 * RealOut[k];
 
@@ -228,7 +218,7 @@ void FFT(int NumSamples,
    if (InverseTransform) {
       float denom = (float) NumSamples;
 
-      for (i = 0; i < NumSamples; i++) {
+      for (size_t i = 0; i < NumSamples; i++) {
          RealOut[i] /= denom;
          ImagOut[i] /= denom;
       }
@@ -238,34 +228,23 @@ void FFT(int NumSamples,
 /*
  * Real Fast Fourier Transform
  *
- * This function was based on the code in Numerical Recipes in C.
- * In Num. Rec., the inner loop is based on a single 1-based array
- * of interleaved real and imaginary numbers.  Because we have two
- * separate zero-based arrays, our indices are quite different.
- * Here is the correspondence between Num. Rec. indices and our indices:
- *
- * i1  <->  real[i]
- * i2  <->  imag[i]
- * i3  <->  real[n/2-i]
- * i4  <->  imag[n/2-i]
+ * This is merely a wrapper of RealFFTf() from RealFFTf.h.
  */
 
-void RealFFT(int NumSamples, float *RealIn, float *RealOut, float *ImagOut)
+void RealFFT(size_t NumSamples, const float *RealIn, float *RealOut, float *ImagOut)
 {
-#ifdef EXPERIMENTAL_USE_REALFFTF
-   // Remap to RealFFTf() function
-   int i;
+   size_t i;
    HFFT hFFT = GetFFT(NumSamples);
    float *pFFT = new float[NumSamples];
    // Copy the data into the processing buffer
-   for(i=0; i<NumSamples; i++)
+   for(i = 0; i < NumSamples; i++)
       pFFT[i] = RealIn[i];
 
    // Perform the FFT
    RealFFTf(pFFT, hFFT);
 
    // Copy the data into the real and imaginary outputs
-   for(i=1;i<(NumSamples/2);i++) {
+   for(i = 1; i < (NumSamples / 2); i++) {
       RealOut[i]=pFFT[hFFT->BitReversed[i]  ];
       ImagOut[i]=pFFT[hFFT->BitReversed[i]+1];
    }
@@ -274,68 +253,14 @@ void RealFFT(int NumSamples, float *RealIn, float *RealOut, float *ImagOut)
    RealOut[i] = pFFT[1];
    ImagOut[0] = ImagOut[i] = 0;
    // Fill in the upper half using symmetry properties
-   for(i++ ; i<NumSamples; i++) {
+   for(i++ ; i < NumSamples; i++) {
       RealOut[i] =  RealOut[NumSamples-i];
       ImagOut[i] = -ImagOut[NumSamples-i];
    }
    delete [] pFFT;
    ReleaseFFT(hFFT);
-
-#else
-
-   int Half = NumSamples / 2;
-   int i;
-
-   float theta = M_PI / Half;
-
-   float *tmpReal = new float[Half];
-   float *tmpImag = new float[Half];
-
-   for (i = 0; i < Half; i++) {
-      tmpReal[i] = RealIn[2 * i];
-      tmpImag[i] = RealIn[2 * i + 1];
-   }
-
-   FFT(Half, 0, tmpReal, tmpImag, RealOut, ImagOut);
-
-   float wtemp = float (sin(0.5 * theta));
-
-   float wpr = -2.0 * wtemp * wtemp;
-   float wpi = -1.0 * float (sin(theta));
-   float wr = 1.0 + wpr;
-   float wi = wpi;
-
-   int i3;
-
-   float h1r, h1i, h2r, h2i;
-
-   for (i = 1; i < Half / 2; i++) {
-
-      i3 = Half - i;
-
-      h1r = 0.5 * (RealOut[i] + RealOut[i3]);
-      h1i = 0.5 * (ImagOut[i] - ImagOut[i3]);
-      h2r = 0.5 * (ImagOut[i] + ImagOut[i3]);
-      h2i = -0.5 * (RealOut[i] - RealOut[i3]);
-
-      RealOut[i] = h1r + wr * h2r - wi * h2i;
-      ImagOut[i] = h1i + wr * h2i + wi * h2r;
-      RealOut[i3] = h1r - wr * h2r + wi * h2i;
-      ImagOut[i3] = -h1i + wr * h2i + wi * h2r;
-
-      wr = (wtemp = wr) * wpr - wi * wpi + wr;
-      wi = wi * wpr + wtemp * wpi + wi;
-   }
-
-   RealOut[0] = (h1r = RealOut[0]) + ImagOut[0];
-   ImagOut[0] = h1r - ImagOut[0];
-
-   delete[]tmpReal;
-   delete[]tmpImag;
-#endif //EXPERIMENTAL_USE_REALFFTF
 }
 
-#ifdef EXPERIMENTAL_USE_REALFFTF
 /*
  * InverseRealFFT
  *
@@ -344,21 +269,23 @@ void RealFFT(int NumSamples, float *RealIn, float *RealOut, float *ImagOut)
  * and as a result the output is purely real.
  * Only the first half of RealIn and ImagIn are used due to this
  * symmetry assumption.
+ *
+ * This is merely a wrapper of InverseRealFFTf() from RealFFTf.h.
  */
-void InverseRealFFT(int NumSamples, float *RealIn, float *ImagIn, float *RealOut)
+void InverseRealFFT(size_t NumSamples, const float *RealIn, const float *ImagIn,
+		    float *RealOut)
 {
-   // Remap to RealFFTf() function
-   int i;
+   size_t i;
    HFFT hFFT = GetFFT(NumSamples);
    float *pFFT = new float[NumSamples];
    // Copy the data into the processing buffer
-   for(i=0; i<(NumSamples/2); i++)
+   for(i = 0; i < (NumSamples / 2); i++)
       pFFT[2*i  ] = RealIn[i];
    if(ImagIn == NULL) {
-      for(i=0; i<(NumSamples/2); i++)
+      for(i = 0; i < (NumSamples/2); i++)
          pFFT[2*i+1] = 0;
    } else {
-      for(i=0; i<(NumSamples/2); i++)
+      for(i = 0; i < (NumSamples/2); i++)
          pFFT[2*i+1] = ImagIn[i];
    }
    // Put the fs/2 component in the imaginary part of the DC bin
@@ -373,36 +300,32 @@ void InverseRealFFT(int NumSamples, float *RealIn, float *ImagIn, float *RealOut
    delete [] pFFT;
    ReleaseFFT(hFFT);
 }
-#endif // EXPERIMENTAL_USE_REALFFTF
 
 /*
  * PowerSpectrum
  *
- * This function computes the same as RealFFT, above, but
- * adds the squares of the real and imaginary part of each
- * coefficient, extracting the power and throwing away the
- * phase.
+ * This function uses RealFFTf() from RealFFTf.h to perform the real
+ * FFT computation, and then squares the real and imaginary part of
+ * each coefficient, extracting the power and throwing away the phase.
  *
  * For speed, it does not call RealFFT, but duplicates some
  * of its code.
  */
 
-void PowerSpectrum(int NumSamples, float *In, float *Out)
+void PowerSpectrum(size_t NumSamples, const float *In, float *Out)
 {
-#ifdef EXPERIMENTAL_USE_REALFFTF
-   // Remap to RealFFTf() function
-   int i;
+   size_t i;
    HFFT hFFT = GetFFT(NumSamples);
    float *pFFT = new float[NumSamples];
    // Copy the data into the processing buffer
-   for(i=0; i<NumSamples; i++)
+   for(i = 0; i < NumSamples; i++)
       pFFT[i] = In[i];
 
    // Perform the FFT
    RealFFTf(pFFT, hFFT);
 
    // Copy the data into the real and imaginary outputs
-   for(i=1;i<NumSamples/2;i++) {
+   for(i = 1; i < NumSamples / 2; i++) {
       Out[i]= (pFFT[hFFT->BitReversed[i]  ]*pFFT[hFFT->BitReversed[i]  ])
          + (pFFT[hFFT->BitReversed[i]+1]*pFFT[hFFT->BitReversed[i]+1]);
    }
@@ -411,73 +334,6 @@ void PowerSpectrum(int NumSamples, float *In, float *Out)
    Out[i] = pFFT[1]*pFFT[1];
    delete [] pFFT;
    ReleaseFFT(hFFT);
-
-#else // EXPERIMENTAL_USE_REALFFTF
-
-   int Half = NumSamples / 2;
-   int i;
-
-   float theta = M_PI / Half;
-
-   float *tmpReal = new float[Half];
-   float *tmpImag = new float[Half];
-   float *RealOut = new float[Half];
-   float *ImagOut = new float[Half];
-
-   for (i = 0; i < Half; i++) {
-      tmpReal[i] = In[2 * i];
-      tmpImag[i] = In[2 * i + 1];
-   }
-
-   FFT(Half, 0, tmpReal, tmpImag, RealOut, ImagOut);
-
-   float wtemp = float (sin(0.5 * theta));
-
-   float wpr = -2.0 * wtemp * wtemp;
-   float wpi = -1.0 * float (sin(theta));
-   float wr = 1.0 + wpr;
-   float wi = wpi;
-
-   int i3;
-
-   float h1r, h1i, h2r, h2i, rt, it;
-
-   for (i = 1; i < Half / 2; i++) {
-
-      i3 = Half - i;
-
-      h1r = 0.5 * (RealOut[i] + RealOut[i3]);
-      h1i = 0.5 * (ImagOut[i] - ImagOut[i3]);
-      h2r = 0.5 * (ImagOut[i] + ImagOut[i3]);
-      h2i = -0.5 * (RealOut[i] - RealOut[i3]);
-
-      rt = h1r + wr * h2r - wi * h2i;
-      it = h1i + wr * h2i + wi * h2r;
-
-      Out[i] = rt * rt + it * it;
-
-      rt = h1r - wr * h2r + wi * h2i;
-      it = -h1i + wr * h2i + wi * h2r;
-
-      Out[i3] = rt * rt + it * it;
-
-      wr = (wtemp = wr) * wpr - wi * wpi + wr;
-      wi = wi * wpr + wtemp * wpi + wi;
-   }
-
-   rt = (h1r = RealOut[0]) + ImagOut[0];
-   it = h1r - ImagOut[0];
-   Out[0] = rt * rt + it * it;
-
-   rt = RealOut[Half / 2];
-   it = ImagOut[Half / 2];
-   Out[Half / 2] = rt * rt + it * it;
-
-   delete[]tmpReal;
-   delete[]tmpImag;
-   delete[]RealOut;
-   delete[]ImagOut;
-#endif // EXPERIMENTAL_USE_REALFFTF
 }
 
 /*
@@ -516,10 +372,13 @@ const wxChar *WindowFuncName(int whichFunction)
    }
 }
 
-void NewWindowFunc(int whichFunction, int NumSamples, bool extraSample, float *in)
+void NewWindowFunc(int whichFunction, size_t NumSamples, bool extraSample, float *in)
 {
-   if (extraSample)
+   if (extraSample) {
+      wxASSERT(NumSamples > 0);
       --NumSamples;
+   }
+   wxASSERT(NumSamples > 0);
 
    switch (whichFunction) {
    default:
@@ -657,7 +516,7 @@ void NewWindowFunc(int whichFunction, int NumSamples, bool extraSample, float *i
 }
 
 // See cautions in FFT.h !
-void WindowFunc(int whichFunction, int NumSamples, float *in)
+void WindowFunc(int whichFunction, size_t NumSamples, float *in)
 {
    bool extraSample = false;
    switch (whichFunction)
@@ -680,12 +539,13 @@ void WindowFunc(int whichFunction, int NumSamples, float *in)
    NewWindowFunc(whichFunction, NumSamples, extraSample, in);
 }
 
-void DerivativeOfWindowFunc(int whichFunction, int NumSamples, bool extraSample, float *in)
+void DerivativeOfWindowFunc(int whichFunction, size_t NumSamples, bool extraSample, float *in)
 {
    if (eWinFuncRectangular == whichFunction)
    {
       // Rectangular
       // There are deltas at the ends
+      wxASSERT(NumSamples > 0);
       --NumSamples;
       // in[0] *= 1.0f;
       for (int ii = 1; ii < NumSamples; ++ii)
@@ -694,8 +554,12 @@ void DerivativeOfWindowFunc(int whichFunction, int NumSamples, bool extraSample,
       return;
    }
 
-   if (extraSample)
+   if (extraSample) {
+      wxASSERT(NumSamples > 0);
       --NumSamples;
+   }
+
+   wxASSERT(NumSamples > 0);
 
    double A;
    switch (whichFunction) {

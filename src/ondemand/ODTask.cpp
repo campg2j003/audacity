@@ -31,6 +31,7 @@ DEFINE_EVENT_TYPE(EVT_ODTASK_COMPLETE)
 
 /// Constructs an ODTask
 ODTask::ODTask()
+: mDemandSample(0)
 {
 
    static int sTaskNumber=0;
@@ -41,8 +42,6 @@ ODTask::ODTask()
    mIsRunning = false;
 
    mTaskNumber=sTaskNumber++;
-
-   mDemandSample=0;
 }
 
 //outside code must ensure this task is not scheduled again.
@@ -128,17 +127,16 @@ void ODTask::DoSome(float amountWork)
       ODManager::Instance()->AddTask(this);
 
       //we did a bit of progress - we should allow a resave.
-      AudacityProject::AllProjectsDeleteLock();
-      for(unsigned i=0; i<gAudacityProjects.GetCount(); i++)
+      ODLocker locker{ &AudacityProject::AllProjectDeleteMutex() };
+      for(unsigned i=0; i<gAudacityProjects.size(); i++)
       {
-         if(IsTaskAssociatedWithProject(gAudacityProjects[i]))
+         if(IsTaskAssociatedWithProject(gAudacityProjects[i].get()))
          {
             //mark the changes so that the project can be resaved.
             gAudacityProjects[i]->GetUndoManager()->SetODChangesFlag();
             break;
          }
       }
-      AudacityProject::AllProjectsDeleteUnlock();
 
 
 //      printf("%s %i is %f done\n", GetTaskName(),GetTaskNumber(),PercentComplete());
@@ -152,11 +150,11 @@ void ODTask::DoSome(float amountWork)
       //END_TASK_PROFILING("On Demand open an 80 mb wav stereo file");
 
       wxCommandEvent event( EVT_ODTASK_COMPLETE );
-      AudacityProject::AllProjectsDeleteLock();
 
-      for(unsigned i=0; i<gAudacityProjects.GetCount(); i++)
+      ODLocker locker{ &AudacityProject::AllProjectDeleteMutex() };
+      for(unsigned i=0; i<gAudacityProjects.size(); i++)
       {
-         if(IsTaskAssociatedWithProject(gAudacityProjects[i]))
+         if(IsTaskAssociatedWithProject(gAudacityProjects[i].get()))
          {
             //this assumes tasks are only associated with one project.
             gAudacityProjects[i]->GetEventHandler()->AddPendingEvent(event);
@@ -165,7 +163,6 @@ void ODTask::DoSome(float amountWork)
             break;
          }
       }
-      AudacityProject::AllProjectsDeleteUnlock();
 
 //      printf("%s %i complete\n", GetTaskName(),GetTaskNumber());
    }
@@ -332,7 +329,7 @@ void ODTask::DemandTrackUpdate(WaveTrack* track, double seconds)
    {
       if(track == mWaveTracks[i])
       {
-         sampleCount newDemandSample = (sampleCount)(seconds * track->GetRate());
+         auto newDemandSample = (sampleCount)(seconds * track->GetRate());
          demandSampleChanged = newDemandSample != GetDemandSample();
          SetDemandSample(newDemandSample);
          break;

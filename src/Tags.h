@@ -35,10 +35,11 @@
 
 #include "MemoryX.h"
 #include <utility>
-#include <wx/dialog.h>
 #include <wx/hashmap.h>
 #include <wx/notebook.h>
 #include <wx/string.h>
+
+#include "widgets/wxPanelWrapper.h"
 
 class wxButton;
 class wxChoice;
@@ -103,13 +104,7 @@ class AUDACITY_DLL_API Tags final : public XMLTagHandler {
    bool HasTag(const wxString & name) const;
    wxString GetTag(const wxString & name) const;
 
-   using IterPair = std::pair<TagMap::const_iterator, TagMap::const_iterator>;
-   struct Iterators : public IterPair {
-      Iterators(IterPair p) : IterPair(p) {}
-      // Define begin() and end() for convenience in range-for
-      auto begin() -> decltype(first) const { return first; }
-      auto end() -> decltype(second) const { return second; }
-   };
+   using Iterators = IteratorRange<TagMap::const_iterator>;
    Iterators GetRange() const;
 
    void SetTag(const wxString & name, const wxString & value);
@@ -135,7 +130,7 @@ class AUDACITY_DLL_API Tags final : public XMLTagHandler {
 inline bool operator != (const Tags &lhs, const Tags &rhs)
 { return !(lhs == rhs); }
 
-class TagsEditor final : public wxDialog
+class TagsEditor final : public wxDialogWrapper
 {
  public:
    // constructors and destructors
@@ -146,6 +141,8 @@ class TagsEditor final : public wxDialog
               bool editTrackNumber);
 
    virtual ~TagsEditor();
+
+   bool IsEscapeKey(const wxKeyEvent& /*event*/) override { return false; }
 
    void PopulateOrExchange(ShuttleGui & S);
 
@@ -171,7 +168,10 @@ class TagsEditor final : public wxDialog
    void OnRemove(wxCommandEvent & event);
 
    void OnOk(wxCommandEvent & event);
+   void DoCancel(bool escKey);
    void OnCancel(wxCommandEvent & event);
+
+   void OnKeyDown(wxKeyEvent &event);
 
    bool IsWindowRectValid(const wxRect *windowRect) const;
 

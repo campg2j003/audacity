@@ -96,7 +96,7 @@ bool EffectFindClipping::Process()
 {
    std::shared_ptr<AddedAnalysisTrack> addedTrack;
    Maybe<ModifiedAnalysisTrack> modifiedTrack;
-   Track *original = NULL;
+   //Track *original = NULL;
    const wxString name{ _("Clipping") };
 
    LabelTrack *lt = NULL;
@@ -125,9 +125,9 @@ bool EffectFindClipping::Process()
       double t1 = mT1 > trackEnd ? trackEnd : mT1;
 
       if (t1 > t0) {
-         sampleCount start = t->TimeToLongSamples(t0);
-         sampleCount end = t->TimeToLongSamples(t1);
-         sampleCount len = (sampleCount)(end - start);
+         auto start = t->TimeToLongSamples(t0);
+         auto end = t->TimeToLongSamples(t1);
+         auto len = end - start;
 
          if (!ProcessOne(lt, count, t, start, len)) {
             return false;
@@ -153,31 +153,40 @@ bool EffectFindClipping::ProcessOne(LabelTrack * lt,
                                     sampleCount len)
 {
    bool bGoodResult = true;
-   sampleCount s = 0;
-   sampleCount blockSize = (sampleCount) (mStart * 1000);
+   size_t blockSize = (mStart * 1000);
 
    if (len < mStart) {
       return true;
    }
 
-   float *buffer = new float[blockSize];
+   float *buffer;
+   try {
+      if (blockSize < mStart)
+         // overflow
+         throw std::bad_alloc{};
+      buffer = new float[blockSize];
+   }
+   catch( const std::bad_alloc & ) {
+      wxMessageBox(_("Requested value exceeds memory capacity."));
+      return false;
+   }
 
    float *ptr = buffer;
 
-   sampleCount startrun = 0;
-   sampleCount stoprun = 0;
-   sampleCount samps = 0;
-   sampleCount block = 0;
+   decltype(len) s = 0, startrun = 0, stoprun = 0, samps = 0;
+   decltype(blockSize) block = 0;
    double startTime = -1.0;
 
    while (s < len) {
       if (block == 0) {
-         if (TrackProgress(count, s / (double) len)) {
+         if (TrackProgress(count,
+                           s.as_double() /
+                           len.as_double() )) {
             bGoodResult = false;
             break;
          }
 
-         block = s + blockSize > len ? len - s : blockSize;
+         block = limitSampleBufferSize( blockSize, len - s );
 
          wt->Get((samplePtr)buffer, floatSample, start + s, block);
          ptr = buffer;
@@ -203,7 +212,7 @@ bool EffectFindClipping::ProcessOne(LabelTrack * lt,
             if (stoprun >= mStop) {
                lt->AddLabel(SelectedRegion(startTime,
                                           wt->LongSamplesToTime(start + s - mStop)),
-                           wxString::Format(wxT("%lld of %lld"), (long long) startrun, (long long) (samps - mStop)));
+                           wxString::Format(wxT("%lld of %lld"), startrun.as_long_long(), (samps - mStop).as_long_long()));
                startrun = 0;
                stoprun = 0;
                samps = 0;

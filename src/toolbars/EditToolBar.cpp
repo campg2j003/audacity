@@ -105,7 +105,7 @@ AButton *EditToolBar::AddButton(
 {
    AButton *&r = mButtons[id];
 
-   r = ToolBar::MakeButton(
+   r = ToolBar::MakeButton(this,
       bmpRecoloredUpSmall, bmpRecoloredDownSmall, bmpRecoloredHiliteSmall,
       eEnabledUp, eEnabledDown, eDisabled,
       wxWindowID(id),
@@ -198,24 +198,40 @@ void EditToolBar::UpdatePrefs()
 void EditToolBar::RegenerateTooltips()
 {
 #if wxUSE_TOOLTIPS
-   mButtons[ETBCutID]->SetToolTip(_("Cut"));
-   mButtons[ETBCopyID]->SetToolTip(_("Copy"));
-   mButtons[ETBPasteID]->SetToolTip(_("Paste"));
-   mButtons[ETBTrimID]->SetToolTip(_("Trim Audio"));
-   mButtons[ETBSilenceID]->SetToolTip(_("Silence Audio"));
-   mButtons[ETBUndoID]->SetToolTip(_("Undo"));
-   mButtons[ETBRedoID]->SetToolTip(_("Redo"));
-   #ifdef EXPERIMENTAL_SYNC_LOCK
-      mButtons[ETBSyncLockID]->SetToolTip(_("Sync-Lock Tracks"));
-   #endif
-   mButtons[ETBZoomInID]->SetToolTip(_("Zoom In"));
-   mButtons[ETBZoomOutID]->SetToolTip(_("Zoom Out"));
-   mButtons[ETBZoomSelID]->SetToolTip(_("Fit Selection"));
-   mButtons[ETBZoomFitID]->SetToolTip(_("Fit Project"));
+   static const struct Entry {
+      int tool;
+      wxString commandName;
+      wxString untranslatedLabel;
+   } table[] = {
+      { ETBCutID,      wxT("Cut"),         XO("Cut")  },
+      { ETBCopyID,     wxT("Copy"),        XO("Copy")  },
+      { ETBPasteID,    wxT("Paste"),       XO("Paste")  },
+      { ETBTrimID,     wxT("Trim"),        XO("Trim Audio")  },
+      { ETBSilenceID,  wxT("Silence"),     XO("Silence Audio")  },
+      { ETBUndoID,     wxT("Undo"),        XO("Undo")  },
+      { ETBRedoID,     wxT("Redo"),        XO("Redo")  },
+
+#ifdef EXPERIMENTAL_SYNC_LOCK
+      { ETBSyncLockID, wxT("SyncLock"),    XO("Sync-Lock Tracks")  },
+#endif
+
+      { ETBZoomInID,   wxT("ZoomIn"),      XO("Zoom In")  },
+      { ETBZoomOutID,  wxT("ZoomOut"),     XO("Zoom Out")  },
+      { ETBZoomSelID,  wxT("ZoomSel"),     XO("Fit Selection")  },
+      { ETBZoomFitID,  wxT("FitInWindow"), XO("Fit Project")  },
 
 #if defined(EXPERIMENTAL_EFFECTS_RACK)
-   mButtons[ETBEffectsID]->SetToolTip(_("Open Effects Rack"));
+      { ETBEffectsID,  wxT(""),            XO("Open Effects Rack")  },
 #endif
+   };
+
+   std::vector<wxString> commands;
+   for (const auto &entry : table) {
+      commands.clear();
+      commands.push_back(wxGetTranslation(entry.untranslatedLabel));
+      commands.push_back(entry.commandName);
+      ToolBar::SetButtonToolTip(*mButtons[entry.tool], commands);
+   }
 #endif
 }
 
@@ -224,30 +240,34 @@ void EditToolBar::OnButton(wxCommandEvent &event)
    AudacityProject *p = GetActiveProject();
    if (!p) return;
 
-   bool busy = gAudioIO->IsBusy();
    int id = event.GetId();
-
+   // FIXME: Some "SelectAllIfNone()" do not work as expected
+   // due to bugs elsewhere (see: AudacityProject::UpdateMenus() )
    switch (id) {
       case ETBCutID:
-         if (!busy) p->OnCut();
+         p->SelectAllIfNone();
+         p->OnCut();
          break;
       case ETBCopyID:
-         if (!busy) p->OnCopy();
+         p->SelectAllIfNone();
+         p->OnCopy();
          break;
       case ETBPasteID:
-         if (!busy) p->OnPaste();
+         p->OnPaste();
          break;
       case ETBTrimID:
-         if (!busy) p->OnTrim();
+         p->SelectAllIfNone();
+         p->OnTrim();
          break;
       case ETBSilenceID:
-         if (!busy) p->OnSilence();
+         p->SelectAllIfNone();
+         p->OnSilence();
          break;
       case ETBUndoID:
-         if (!busy) p->OnUndo();
+         p->OnUndo();
          break;
       case ETBRedoID:
-         if (!busy) p->OnRedo();
+         p->OnRedo();
          break;
 #ifdef EXPERIMENTAL_SYNC_LOCK
       case ETBSyncLockID:
@@ -287,38 +307,28 @@ void EditToolBar::EnableDisableButtons()
 {
    AudacityProject *p = GetActiveProject();
    if (!p) return;
+   CommandManager* cm = p->GetCommandManager();
+   if (!cm) return;
 
-   // Is anything selected?
-   bool selection = false;
-   TrackListIterator iter(p->GetTracks());
-   for (Track *t = iter.First(); t; t = iter.Next())
-      if (t->GetSelected()) {
-         selection = true;
-         break;
-      }
-   selection &= (p->GetSel0() < p->GetSel1());
+   mButtons[ETBCutID]->SetEnabled(cm->GetEnabled("Cut"));
+   mButtons[ETBCopyID]->SetEnabled(cm->GetEnabled("Copy"));
+   mButtons[ETBTrimID]->SetEnabled(cm->GetEnabled("Trim"));
+   mButtons[ETBSilenceID]->SetEnabled(cm->GetEnabled("Silence"));
 
-   mButtons[ETBCutID]->SetEnabled(selection);
-   mButtons[ETBCopyID]->SetEnabled(selection);
-   mButtons[ETBTrimID]->SetEnabled(selection);
-   mButtons[ETBSilenceID]->SetEnabled(selection);
+   mButtons[ETBUndoID]->SetEnabled(cm->GetEnabled("Undo"));
+   mButtons[ETBRedoID]->SetEnabled(cm->GetEnabled("Redo"));
 
-   mButtons[ETBUndoID]->SetEnabled(p->GetUndoManager()->UndoAvailable());
-   mButtons[ETBRedoID]->SetEnabled(p->GetUndoManager()->RedoAvailable());
-
-   bool tracks = (!p->GetTracks()->IsEmpty());
-
-   mButtons[ETBZoomInID]->SetEnabled(tracks && (p->ZoomInAvailable()));
-   mButtons[ETBZoomOutID]->SetEnabled(tracks && (p->ZoomOutAvailable()) );
+   mButtons[ETBZoomInID]->SetEnabled(cm->GetEnabled("ZoomIn"));
+   mButtons[ETBZoomOutID]->SetEnabled(cm->GetEnabled("ZoomOut"));
 
    #if 0 // Disabled for version 1.2.0 since it doesn't work quite right...
-   mButtons[ETBZoomToggleID]->SetEnabled(tracks);
+   mButtons[ETBZoomToggleID]->SetEnabled(true);
    #endif
 
-   mButtons[ETBZoomSelID]->SetEnabled(selection);
-   mButtons[ETBZoomFitID]->SetEnabled(tracks);
+   mButtons[ETBZoomSelID]->SetEnabled(cm->GetEnabled("ZoomSel"));
+   mButtons[ETBZoomFitID]->SetEnabled(cm->GetEnabled("FitInWindow"));
 
-   mButtons[ETBPasteID]->SetEnabled(p->Clipboard());
+   mButtons[ETBPasteID]->SetEnabled(cm->GetEnabled("Paste"));
 
 #ifdef EXPERIMENTAL_SYNC_LOCK
    bool bSyncLockTracks;

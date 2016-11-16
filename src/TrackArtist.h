@@ -18,6 +18,7 @@
 #ifndef __AUDACITY_TRACKARTIST__
 #define __AUDACITY_TRACKARTIST__
 
+#include "MemoryX.h"
 #include <wx/brush.h>
 #include <wx/pen.h>
 #include "Experimental.h"
@@ -141,6 +142,7 @@ class AUDACITY_DLL_API TrackArtist {
    void DrawWaveformBackground(wxDC & dc, int leftOffset, const wxRect &rect,
                                const double env[],
                                float zoomMin, float zoomMax,
+                               int zeroLevelYCoordinate,
                                bool dB, float dBRange,
                                double t0, double t1, const ZoomInfo &zoomInfo,
                                bool drawEnvelope, bool bIsSyncLockSelected);
@@ -200,7 +202,7 @@ class AUDACITY_DLL_API TrackArtist {
    wxPen muteClippedPen;
    wxPen blankSelectedPen;
 
-   Ruler *vruler;
+   std::unique_ptr<Ruler> vruler;
 
 #ifdef EXPERIMENTAL_FFT_Y_GRID
    bool fftYGridOld;

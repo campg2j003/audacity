@@ -50,8 +50,8 @@ Param( MaximumPause,       double,  XO("MaximumPause"),     1.0,     0.0,     DB
  * Common constants
  */
 
-static const int kBufSize = 131072;     // number of samples to process at once
-static const int kRMSWindowSize = 100;  // samples in circular RMS window buffer
+enum : size_t { kBufSize = 131072 };     // number of samples to process at once
+enum : size_t { kRMSWindowSize = 100 };  // samples in circular RMS window buffer
 
 /*
  * A auto duck region and an array of auto duck regions
@@ -201,7 +201,7 @@ bool EffectAutoDuck::Init()
    Track *t = iter.First();
 
    bool lastWasSelectedWaveTrack = false;
-   WaveTrack *controlTrackCandidate = NULL;
+   const WaveTrack *controlTrackCandidate = NULL;
 
    while(t)
    {
@@ -219,7 +219,8 @@ bool EffectAutoDuck::Init()
          if (t->GetKind() == Track::Wave)
          {
             lastWasSelectedWaveTrack = true;
-         } else
+         }
+         else
          {
             wxMessageBox(
                _("You selected a track which does not contain audio. AutoDuck can only process audio tracks."),
@@ -254,16 +255,14 @@ void EffectAutoDuck::End()
 
 bool EffectAutoDuck::Process()
 {
-   sampleCount i;
-
    if (GetNumWaveTracks() == 0 || !mControlTrack)
       return false;
 
    bool cancel = false;
 
-   sampleCount start =
+   auto start =
       mControlTrack->TimeToLongSamples(mT0 + mOuterFadeDownLen);
-   sampleCount end =
+   auto end =
       mControlTrack->TimeToLongSamples(mT1 - mOuterFadeUpLen);
 
    if (end <= start)
@@ -277,7 +276,7 @@ bool EffectAutoDuck::Process()
    if (maxPause < mOuterFadeDownLen + mOuterFadeUpLen)
       maxPause = mOuterFadeDownLen + mOuterFadeUpLen;
 
-   sampleCount minSamplesPause =
+   auto minSamplesPause =
       mControlTrack->TimeToLongSamples(maxPause);
 
    double threshold = DB_TO_LINEAR(mThresholdDb);
@@ -288,7 +287,7 @@ bool EffectAutoDuck::Process()
    int rmsPos = 0;
    float rmsSum = 0;
    float *rmsWindow = new float[kRMSWindowSize];
-   for (i = 0; i < kRMSWindowSize; i++)
+   for (size_t i = 0; i < kRMSWindowSize; i++)
       rmsWindow[i] = 0;
 
    float *buf = new float[kBufSize];
@@ -302,20 +301,20 @@ bool EffectAutoDuck::Process()
    // to make the progress bar appear more natural, we first look for all
    // duck regions and apply them all at once afterwards
    AutoDuckRegionArray regions;
-   sampleCount pos = start;
+   auto pos = start;
 
    while (pos < end)
    {
-      sampleCount len = end - pos;
-      if (len > kBufSize)
-         len = kBufSize;
+      const auto len = limitSampleBufferSize( kBufSize, end - pos );
 
-      mControlTrack->Get((samplePtr)buf, floatSample, pos, (sampleCount)len);
+      mControlTrack->Get((samplePtr)buf, floatSample, pos, len);
 
-      for (i = pos; i < pos + len; i++)
+      for (auto i = pos; i < pos + len; i++)
       {
          rmsSum -= rmsWindow[rmsPos];
-         rmsWindow[rmsPos] = buf[i - pos] * buf[i - pos];
+         // i - pos is bounded by len:
+         auto index = ( i - pos ).as_size_t();
+         rmsWindow[rmsPos] = buf[ index ] * buf[ index ];
          rmsSum += rmsWindow[rmsPos];
          rmsPos = (rmsPos + 1) % kRMSWindowSize;
 
@@ -360,8 +359,11 @@ bool EffectAutoDuck::Process()
 
       pos += len;
 
-      if (TotalProgress( ((double)(pos-start)) / (end-start) /
-                         (GetNumWaveTracks() + 1) ))
+      if (TotalProgress(
+            (pos - start).as_double() /
+            (end - start).as_double() /
+            (GetNumWaveTracks() + 1)
+      ))
       {
          cancel = true;
          break;
@@ -384,18 +386,16 @@ bool EffectAutoDuck::Process()
    if (!cancel)
    {
       CopyInputTracks(); // Set up mOutputTracks.
-      SelectedTrackListOfKindIterator iter(Track::Wave, mOutputTracks);
+      SelectedTrackListOfKindIterator iter(Track::Wave, mOutputTracks.get());
       Track *iterTrack = iter.First();
 
       int trackNumber = 0;
 
       while (iterTrack)
       {
-         wxASSERT(iterTrack->GetKind() == Track::Wave);
-
          WaveTrack* t = (WaveTrack*)iterTrack;
 
-         for (i = 0; i < (int)regions.GetCount(); i++)
+         for (size_t i = 0; i < regions.GetCount(); i++)
          {
             const AutoDuckRegion& region = regions[i];
             if (ApplyDuckFade(trackNumber, t, region.t0, region.t1))
@@ -515,37 +515,35 @@ bool EffectAutoDuck::ApplyDuckFade(int trackNumber, WaveTrack* t,
 {
    bool cancel = false;
 
-   sampleCount start = t->TimeToLongSamples(t0);
-   sampleCount end = t->TimeToLongSamples(t1);
+   auto start = t->TimeToLongSamples(t0);
+   auto end = t->TimeToLongSamples(t1);
 
    float *buf = new float[kBufSize];
-   sampleCount pos = start;
+   auto pos = start;
 
-   int fadeDownSamples = t->TimeToLongSamples(
+   auto fadeDownSamples = t->TimeToLongSamples(
       mOuterFadeDownLen + mInnerFadeDownLen);
    if (fadeDownSamples < 1)
       fadeDownSamples = 1;
 
-   int fadeUpSamples = t->TimeToLongSamples(
+   auto fadeUpSamples = t->TimeToLongSamples(
       mOuterFadeUpLen + mInnerFadeUpLen);
    if (fadeUpSamples < 1)
       fadeUpSamples = 1;
 
-   float fadeDownStep = mDuckAmountDb / fadeDownSamples;
-   float fadeUpStep = mDuckAmountDb / fadeUpSamples;
+   float fadeDownStep = mDuckAmountDb / fadeDownSamples.as_double();
+   float fadeUpStep = mDuckAmountDb / fadeUpSamples.as_double();
 
    while (pos < end)
    {
-      sampleCount len = end - pos;
-      if (len > kBufSize)
-         len = kBufSize;
+      const auto len = limitSampleBufferSize( kBufSize, end - pos );
 
       t->Get((samplePtr)buf, floatSample, pos, len);
 
-      for (sampleCount i = pos; i < pos + len; i++)
+      for (auto i = pos; i < pos + len; i++)
       {
-         float gainDown = fadeDownStep * (i - start);
-         float gainUp = fadeUpStep * (end - i);;
+         float gainDown = fadeDownStep * (i - start).as_float();
+         float gainUp = fadeUpStep * (end - i).as_float();
 
          float gain;
          if (gainDown > gainUp)
@@ -555,7 +553,8 @@ bool EffectAutoDuck::ApplyDuckFade(int trackNumber, WaveTrack* t,
          if (gain < mDuckAmountDb)
             gain = mDuckAmountDb;
 
-         buf[i - pos] *= DB_TO_LINEAR(gain);
+         // i - pos is bounded by len:
+         buf[ ( i - pos ).as_size_t() ] *= DB_TO_LINEAR(gain);
       }
 
       t->Set((samplePtr)buf, floatSample, pos, len);
@@ -607,7 +606,7 @@ static int GetDistance(const wxPoint& first, const wxPoint& second)
       return distanceY;
 }
 
-BEGIN_EVENT_TABLE(EffectAutoDuckPanel, wxPanel)
+BEGIN_EVENT_TABLE(EffectAutoDuckPanel, wxPanelWrapper)
    EVT_PAINT(EffectAutoDuckPanel::OnPaint)
    EVT_MOUSE_CAPTURE_CHANGED(EffectAutoDuckPanel::OnMouseCaptureChanged)
    EVT_MOUSE_CAPTURE_LOST(EffectAutoDuckPanel::OnMouseCaptureLost)
@@ -617,7 +616,7 @@ BEGIN_EVENT_TABLE(EffectAutoDuckPanel, wxPanel)
 END_EVENT_TABLE()
 
 EffectAutoDuckPanel::EffectAutoDuckPanel(wxWindow *parent, EffectAutoDuck *effect)
-:  wxPanel(parent, wxID_ANY, wxDefaultPosition, wxSize(600, 300))
+:  wxPanelWrapper(parent, wxID_ANY, wxDefaultPosition, wxSize(600, 300))
 {
    mParent = parent;
    mEffect = effect;
@@ -629,8 +628,6 @@ EffectAutoDuckPanel::EffectAutoDuckPanel(wxWindow *parent, EffectAutoDuck *effec
 
 EffectAutoDuckPanel::~EffectAutoDuckPanel()
 {
-   if (mBackgroundBitmap)
-      delete mBackgroundBitmap;
    if(HasCapture())
       ReleaseMouse();
 }
@@ -652,9 +649,7 @@ void EffectAutoDuckPanel::OnPaint(wxPaintEvent & WXUNUSED(evt))
    if (!mBackgroundBitmap || mBackgroundBitmap->GetWidth() != clientWidth ||
        mBackgroundBitmap->GetHeight() != clientHeight)
    {
-      if (mBackgroundBitmap)
-         delete mBackgroundBitmap;
-      mBackgroundBitmap = new wxBitmap(clientWidth, clientHeight);
+      mBackgroundBitmap = std::make_unique<wxBitmap>(clientWidth, clientHeight);
    }
 
    wxMemoryDC dc;
@@ -862,7 +857,8 @@ void EffectAutoDuckPanel::OnLeftDown(wxMouseEvent & evt)
       for (int i = 0; i < AUTO_DUCK_PANEL_NUM_CONTROL_POINTS; i++)
          mMoveStartControlPoints[i] = mControlPoints[i];
 
-      CaptureMouse();
+      if( !HasCapture() )
+         CaptureMouse();
    }
 }
 

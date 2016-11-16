@@ -20,13 +20,10 @@
 #include "xml/XMLTagHandler.h"
 
 #include "Experimental.h"
-#ifdef EXPERIMENTAL_USE_REALFFTF
 #include "RealFFTf.h"
-#endif
 
 #include <wx/gdicmn.h>
 #include <wx/longlong.h>
-#include <wx/list.h>
 #include <wx/msgdlg.h>
 
 #include <vector>
@@ -44,13 +41,10 @@ public:
 
    // Make invalid cache
    SpecCache()
-      : len(-1)
-      , algorithm(-1)
+      : algorithm(-1)
       , pps(-1.0)
       , start(-1.0)
       , windowType(-1)
-      , windowSize(-1)
-      , zeroPaddingFactor(-1)
       , frequencyGain(-1)
 #if 0
       , freq(NULL)
@@ -61,9 +55,9 @@ public:
    }
 
    // Make valid cache, to be filled in
-   SpecCache(int cacheLen, int algorithm_,
-      double pps_, double start_, int windowType_, int windowSize_,
-      int zeroPaddingFactor_, int frequencyGain_)
+   SpecCache(size_t cacheLen, int algorithm_,
+      double pps_, double start_, int windowType_, size_t windowSize_,
+      unsigned zeroPaddingFactor_, int frequencyGain_)
       : len(cacheLen)
       , algorithm(algorithm_)
       , pps(pps_)
@@ -100,21 +94,22 @@ public:
        double offset, double rate, double pixelsPerSecond,
        int lowerBoundX, int upperBoundX,
        const std::vector<float> &gainFactors,
-       float *scratch);
+       float* __restrict scratch,
+       float* __restrict out) const;
 
    void Populate
       (const SpectrogramSettings &settings, WaveTrackCache &waveTrackCache,
-       int copyBegin, int copyEnd, int numPixels,
+       int copyBegin, int copyEnd, size_t numPixels,
        sampleCount numSamples,
        double offset, double rate, double pixelsPerSecond);
 
-   const int          len; // counts pixels, not samples
+   const size_t       len { 0 }; // counts pixels, not samples
    const int          algorithm;
    const double       pps;
    const double       start;
    const int          windowType;
-   const int          windowSize;
-   const int          zeroPaddingFactor;
+   const size_t       windowSize { 0 };
+   const unsigned     zeroPaddingFactor { 0 };
    const int          frequencyGain;
    std::vector<float> freq;
    std::vector<sampleCount> where;
@@ -124,7 +119,7 @@ public:
 
 class SpecPxCache {
 public:
-   SpecPxCache(int cacheLen)
+   SpecPxCache(size_t cacheLen)
    {
       len = cacheLen;
       values = new float[len];
@@ -139,7 +134,7 @@ public:
       delete[] values;
    }
 
-   sampleCount  len;
+   size_t  len;
    float       *values;
    bool         valid;
 
@@ -152,8 +147,13 @@ public:
 
 class WaveClip;
 
-WX_DECLARE_USER_EXPORTED_LIST(WaveClip, WaveClipList, AUDACITY_DLL_API);
-WX_DEFINE_USER_EXPORTED_ARRAY_PTR(WaveClip*, WaveClipArray, class AUDACITY_DLL_API);
+// Array of pointers that assume ownership
+using WaveClipHolders = std::vector < movable_ptr< WaveClip > >;
+using WaveClipConstHolders = std::vector < movable_ptr< const WaveClip > >;
+
+// Temporary arrays of mere pointers
+using WaveClipPointers = std::vector < WaveClip* >;
+using WaveClipConstPointers = std::vector < const WaveClip* >;
 
 // A bundle of arrays needed for drawing waveforms.  The object may or may not
 // own the storage for those arrays.  If it does, it destroys them.
@@ -206,17 +206,18 @@ class AUDACITY_DLL_API WaveClip final : public XMLTagHandler
 {
 private:
    // It is an error to copy a WaveClip without specifying the DirManager.
+
    WaveClip(const WaveClip&) PROHIBITED;
    WaveClip& operator= (const WaveClip&) PROHIBITED;
 
 public:
    // typical constructor
-   WaveClip(DirManager *projDirManager, sampleFormat format, int rate);
+   WaveClip(const std::shared_ptr<DirManager> &projDirManager, sampleFormat format, int rate);
 
    // essentially a copy constructor - but you must pass in the
    // current project's DirManager, because we might be copying
    // from one project to another
-   WaveClip(const WaveClip& orig, DirManager *projDirManager);
+   WaveClip(const WaveClip& orig, const std::shared_ptr<DirManager> &projDirManager);
 
    virtual ~WaveClip();
 
@@ -249,12 +250,12 @@ public:
    bool AfterClip(double t) const;
 
    bool GetSamples(samplePtr buffer, sampleFormat format,
-                   sampleCount start, sampleCount len) const;
+                   sampleCount start, size_t len) const;
    bool SetSamples(samplePtr buffer, sampleFormat format,
-                   sampleCount start, sampleCount len);
+                   sampleCount start, size_t len);
 
-   Envelope* GetEnvelope() { return mEnvelope; }
-   const Envelope* GetEnvelope() const { return mEnvelope; }
+   Envelope* GetEnvelope() { return mEnvelope.get(); }
+   const Envelope* GetEnvelope() const { return mEnvelope.get(); }
    BlockArray* GetSequenceBlockArray();
 
    // Get low-level access to the sequence. Whenever possible, don't use this,
@@ -276,14 +277,14 @@ public:
                        double t0, double pixelsPerSecond, bool &isLoadingOD) const;
    bool GetSpectrogram(WaveTrackCache &cache,
                        const float *& spectrogram, const sampleCount *& where,
-                       int numPixels,
+                       size_t numPixels,
                        double t0, double pixelsPerSecond) const;
    bool GetMinMax(float *min, float *max, double t0, double t1) const;
    bool GetRMS(float *rms, double t0, double t1);
 
    // Set/clear/get rectangle that this WaveClip fills on screen. This is
    // called by TrackArtist while actually drawing the tracks and clips.
-   void ClearDisplayRect();
+   void ClearDisplayRect() const;
    void SetDisplayRect(const wxRect& r) const;
    void GetDisplayRect(wxRect* r);
 
@@ -294,16 +295,16 @@ public:
 
    /// You must call Flush after the last Append
    bool Append(samplePtr buffer, sampleFormat format,
-               sampleCount len, unsigned int stride=1,
+               size_t len, unsigned int stride=1,
                XMLWriter* blockFileLog = NULL);
    /// Flush must be called after last Append
    bool Flush();
 
    bool AppendAlias(const wxString &fName, sampleCount start,
-                    sampleCount len, int channel,bool useOD);
+                    size_t len, int channel,bool useOD);
 
    bool AppendCoded(const wxString &fName, sampleCount start,
-                            sampleCount len, int channel, int decodeType);
+                            size_t len, int channel, int decodeType);
 
    /// This name is consistent with WaveTrack::Clear. It performs a "Cut"
    /// operation (but without putting the cutted audio to the clipboard)
@@ -320,7 +321,10 @@ public:
    bool InsertSilence(double t, double len);
 
    /// Get access to cut lines list
-   WaveClipList* GetCutLines() { return &mCutLines; }
+   WaveClipHolders &GetCutLines() { return mCutLines; }
+   const WaveClipConstHolders &GetCutLines() const
+      { return reinterpret_cast< const WaveClipConstHolders& >( mCutLines ); }
+   size_t NumCutLines() const { return mCutLines.size(); }
 
    /** Find cut line at (approximately) this position. Returns true and fills
     * in cutLineStart and cutLineEnd (if specified) if a cut line at this
@@ -350,10 +354,10 @@ public:
    // not balanced by unlocking calls.
 
    ///Delete the wave cache - force redraw.  Thread-safe
-   void DeleteWaveCache();
+   void ClearWaveCache();
 
    ///Adds an invalid region to the wavecache so it redraws that portion only.
-   void AddInvalidRegion(long startSample, long endSample);
+   void AddInvalidRegion(sampleCount startSample, sampleCount endSample);
 
    //
    // XMLTagHandler callback methods for loading and saving
@@ -365,7 +369,7 @@ public:
    void WriteXML(XMLWriter &xmlFile) /* not override */;
 
    // Cache of values to colour pixels of Spectrogram - used by TrackArtist
-   mutable SpecPxCache    *mSpecPxCache;
+   mutable std::unique_ptr<SpecPxCache> mSpecPxCache;
 
    // AWD, Oct 2009: for pasting whitespace at the end of selection
    bool GetIsPlaceholder() const { return mIsPlaceholder; }
@@ -379,17 +383,17 @@ protected:
    int mDirty;
    bool mIsCutLine;
    std::unique_ptr<Sequence> mSequence;
-   Envelope *mEnvelope;
+   std::unique_ptr<Envelope> mEnvelope;
 
-   mutable WaveCache    *mWaveCache;
+   mutable std::unique_ptr<WaveCache> mWaveCache;
    mutable ODLock       mWaveCacheMutex;
-   mutable SpecCache    *mSpecCache;
+   mutable std::unique_ptr<SpecCache> mSpecCache;
    SampleBuffer  mAppendBuffer;
-   sampleCount   mAppendBufferLen;
+   size_t        mAppendBufferLen;
 
    // Cut Lines are nothing more than ordinary wave clips, with the
    // offset relative to the start of the clip.
-   WaveClipList mCutLines;
+   WaveClipHolders mCutLines;
 
    // AWD, Oct. 2009: for whitespace-at-end-of-selection pasting
    bool mIsPlaceholder;

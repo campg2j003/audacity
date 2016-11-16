@@ -172,12 +172,12 @@ bool LoadFFmpeg(bool showerror);
 /// If Audacity failed to load libav*, this dialog
 /// shows up and tells user about that. It will pop-up
 /// again and again until it is disabled.
-class FFmpegNotFoundDialog final : public wxDialog
+class FFmpegNotFoundDialog final : public wxDialogWrapper
 {
 public:
 
    FFmpegNotFoundDialog(wxWindow *parent)
-      :  wxDialog(parent, wxID_ANY, wxString(_("FFmpeg not found")))
+      :  wxDialogWrapper(parent, wxID_ANY, wxString(_("FFmpeg not found")))
    {
       SetName(GetTitle());
       ShuttleGui S(this, eIsCreating);
@@ -376,9 +376,7 @@ private:
    wxString mAVUtilVersion;
 
    ///! wx interfaces for dynamic libraries
-   wxDynamicLibrary *avformat;
-   wxDynamicLibrary *avcodec;
-   wxDynamicLibrary *avutil;
+   std::unique_ptr<wxDynamicLibrary> avformat, avcodec, avutil;
 
    ///! true if libraries are loaded, false otherwise
    bool mLibsLoaded;
@@ -671,12 +669,21 @@ extern "C" {
       (AVFormatContext *s, AVDictionary **options),
       (s, options)
    );
+#if LIBAVFORMAT_VERSION_INT >= AV_VERSION_INT(55, 33, 101)
+   FFMPEG_FUNCTION_WITH_RETURN(
+      AVOutputFormat*,
+      av_oformat_next,
+      (const AVOutputFormat *f),
+      (f)
+   );
+#else
    FFMPEG_FUNCTION_WITH_RETURN(
       AVOutputFormat*,
       av_oformat_next,
       (AVOutputFormat *f),
       (f)
    );
+#endif
    FFMPEG_FUNCTION_WITH_RETURN(
       AVCodec*,
       av_codec_next,
@@ -743,12 +750,21 @@ extern "C" {
       (AVFifoBuffer *f),
       (f)
    );
+#if LIBAVUTIL_VERSION_MAJOR >= 53
+   FFMPEG_FUNCTION_WITH_RETURN(
+      int,
+      av_fifo_size,
+      (const AVFifoBuffer *f),
+      (f)
+   );
+#else
    FFMPEG_FUNCTION_WITH_RETURN(
       int,
       av_fifo_size,
       (AVFifoBuffer *f),
       (f)
    );
+#endif
    FFMPEG_FUNCTION_WITH_RETURN(
       void*,
       av_malloc,
@@ -796,12 +812,21 @@ extern "C" {
       (AVDictionary **m),
       (m)
       );
+#if LIBAVUTIL_VERSION_MAJOR >= 53
+   FFMPEG_FUNCTION_WITH_RETURN(
+      AVDictionaryEntry *,
+      av_dict_get,
+      (const AVDictionary *m, const char *key, const AVDictionaryEntry *prev, int flags),
+      (m, key, prev, flags)
+   );
+#else
    FFMPEG_FUNCTION_WITH_RETURN(
       AVDictionaryEntry *,
       av_dict_get,
       (AVDictionary *m, const char *key, const AVDictionaryEntry *prev, int flags),
       (m, key, prev, flags)
    );
+#endif
    FFMPEG_FUNCTION_WITH_RETURN(
       int,
       av_dict_set,

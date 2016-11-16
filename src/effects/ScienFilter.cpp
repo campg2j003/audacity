@@ -205,12 +205,12 @@ EffectType EffectScienFilter::GetType()
 
 // EffectClientInterface implementation
 
-int EffectScienFilter::GetAudioInCount()
+unsigned EffectScienFilter::GetAudioInCount()
 {
    return 1;
 }
 
-int EffectScienFilter::GetAudioOutCount()
+unsigned EffectScienFilter::GetAudioOutCount()
 {
    return 1;
 }
@@ -228,7 +228,7 @@ bool EffectScienFilter::ProcessInitialize(sampleCount WXUNUSED(totalLen), Channe
    return true;
 }
 
-sampleCount EffectScienFilter::ProcessBlock(float **inBlock, float **outBlock, sampleCount blockLen)
+size_t EffectScienFilter::ProcessBlock(float **inBlock, float **outBlock, size_t blockLen)
 {
    float *ibuf = inBlock[0];
    for (int iPair = 0; iPair < (mOrder + 1) / 2; iPair++)
@@ -339,7 +339,7 @@ bool EffectScienFilter::Init()
 
    while (t)
    {
-      if (t->GetSelected() && t->GetKind() == Track::Wave)
+      if (t->GetSelected())
       {
          if (selcount == 0)
          {
@@ -1008,13 +1008,13 @@ void EffectScienFilter::EnableDisableRippleCtl(int FilterType)
 // EffectScienFilterPanel
 //----------------------------------------------------------------------------
 
-BEGIN_EVENT_TABLE(EffectScienFilterPanel, wxPanel)
+BEGIN_EVENT_TABLE(EffectScienFilterPanel, wxPanelWrapper)
     EVT_PAINT(EffectScienFilterPanel::OnPaint)
     EVT_SIZE(EffectScienFilterPanel::OnSize)
 END_EVENT_TABLE()
 
 EffectScienFilterPanel::EffectScienFilterPanel(EffectScienFilter *effect, wxWindow *parent)
-:  wxPanel(parent, wxID_ANY, wxDefaultPosition, wxSize(400, 200))
+:  wxPanelWrapper(parent, wxID_ANY, wxDefaultPosition, wxSize(400, 200))
 {
    mEffect = effect;
    mParent = parent;
@@ -1030,10 +1030,6 @@ EffectScienFilterPanel::EffectScienFilterPanel(EffectScienFilter *effect, wxWind
 
 EffectScienFilterPanel::~EffectScienFilterPanel()
 {
-   if (mBitmap)
-   {
-      delete mBitmap;
-   }
 }
 
 void EffectScienFilterPanel::SetFreqRange(double lo, double hi)
@@ -1073,14 +1069,9 @@ void EffectScienFilterPanel::OnPaint(wxPaintEvent & WXUNUSED(evt))
 
    if (!mBitmap || mWidth != width || mHeight != height)
    {
-      if (mBitmap)
-      {
-         delete mBitmap;
-      }
-
       mWidth = width;
       mHeight = height;
-      mBitmap = new wxBitmap(mWidth, mHeight);
+      mBitmap = std::make_unique<wxBitmap>(mWidth, mHeight);
    }
 
    wxBrush bkgndBrush(wxSystemSettings::GetColour(wxSYS_COLOUR_3DFACE));

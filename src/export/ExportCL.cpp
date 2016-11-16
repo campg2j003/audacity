@@ -39,7 +39,7 @@
 // ExportCLOptions
 //----------------------------------------------------------------------------
 
-class ExportCLOptions final : public wxPanel
+class ExportCLOptions final : public wxPanelWrapper
 {
 public:
    ExportCLOptions(wxWindow *parent, int format);
@@ -60,14 +60,14 @@ private:
 
 #define ID_BROWSE 5000
 
-BEGIN_EVENT_TABLE(ExportCLOptions, wxPanel)
+BEGIN_EVENT_TABLE(ExportCLOptions, wxPanelWrapper)
    EVT_BUTTON(ID_BROWSE, ExportCLOptions::OnBrowse)
 END_EVENT_TABLE()
 
 ///
 ///
 ExportCLOptions::ExportCLOptions(wxWindow *parent, int WXUNUSED(format))
-:  wxPanel(parent, wxID_ANY)
+:  wxPanelWrapper(parent, wxID_ANY)
 {
    mHistory.Load(*gPrefs, wxT("/FileFormats/ExternalProgramHistory"));
 
@@ -284,7 +284,7 @@ public:
    wxWindow *OptionsCreate(wxWindow *parent, int format);
 
    int Export(AudacityProject *project,
-               int channels,
+               unsigned channels,
                const wxString &fName,
                bool selectedOnly,
                double t0,
@@ -306,7 +306,7 @@ ExportCL::ExportCL()
 }
 
 int ExportCL::Export(AudacityProject *project,
-                      int channels,
+                      unsigned channels,
                       const wxString &fName,
                       bool selectionOnly,
                       double t0,
@@ -375,7 +375,7 @@ int ExportCL::Export(AudacityProject *project,
 
    // establish parameters
    int rate = lrint(project->GetRate());
-   sampleCount maxBlockLen = 44100 * 5;
+   const size_t maxBlockLen = 44100 * 5;
    unsigned long totalSamples = lrint((t1 - t0) * rate);
    unsigned long sampleBytes = totalSamples * channels * SAMPLE_SIZE(int16Sample);
 
@@ -448,7 +448,7 @@ int ExportCL::Export(AudacityProject *project,
 
          // Need to mix another block
          if (numBytes == 0) {
-            sampleCount numSamples = mixer->Process(maxBlockLen);
+            auto numSamples = mixer->Process(maxBlockLen);
             if (numSamples == 0) {
                break;
             }
@@ -498,7 +498,7 @@ int ExportCL::Export(AudacityProject *project,
    // Display output on error or if the user wants to see it
    if (process.GetStatus() != 0 || show) {
       // TODO use ShowInfoDialog() instead.
-      wxDialog dlg(NULL,
+      wxDialogWrapper dlg(nullptr,
                    wxID_ANY,
                    wxString(_("Command Output")),
                    wxDefaultPosition,

@@ -75,9 +75,9 @@ class EditToolBar;
 class MeterToolBar;
 class MixerToolBar;
 class Scrubber;
+class ScrubbingToolBar;
 class SelectionBar;
 class SpectralSelectionBar;
-class Toolbar;
 class ToolManager;
 class ToolsToolBar;
 class TranscriptionToolBar;
@@ -92,7 +92,6 @@ class MixerBoardFrame;
 struct AudioIOStartStreamOptions;
 struct UndoState;
 
-class WaveTrackArray;
 class Regions;
 
 class LWSlider;
@@ -111,7 +110,9 @@ void GetDefaultWindowRect(wxRect *defRect);
 void GetNextWindowPlacement(wxRect *nextRect, bool *pMaximized, bool *pIconized);
 bool IsWindowAccessible(wxRect *requestedRect);
 
-WX_DEFINE_ARRAY(AudacityProject *, AProjectArray);
+// Use shared_ptr to projects, because elsewhere we need weak_ptr
+using AProjectHolder = std::shared_ptr< AudacityProject >;
+using AProjectArray = std::vector< AProjectHolder >;
 
 extern AProjectArray gAudacityProjects;
 
@@ -166,7 +167,7 @@ class AUDACITY_DLL_API AudacityProject final : public wxFrame,
 
    AudioIOStartStreamOptions GetDefaultPlayOptions();
 
-   TrackList *GetTracks() { return mTracks; }
+   TrackList *GetTracks() { return mTracks.get(); }
    UndoManager *GetUndoManager() { return mUndoManager.get(); }
 
    sampleFormat GetDefaultFormat() { return mDefaultFormat; }
@@ -194,7 +195,7 @@ class AUDACITY_DLL_API AudacityProject final : public wxFrame,
    bool Clipboard() { return (msClipT1 - msClipT0) > 0.0; }
 
    wxString GetName();
-   DirManager *GetDirManager();
+   const std::shared_ptr<DirManager> &GetDirManager();
    TrackFactory *GetTrackFactory();
    AdornedRulerPanel *GetRulerPanel();
    const Tags *GetTags();
@@ -256,9 +257,10 @@ class AUDACITY_DLL_API AudacityProject final : public wxFrame,
 
    const wxString &GetFileName() { return mFileName; }
    bool GetDirty() { return mDirty; }
-   void SetProjectTitle();
+   void SetProjectTitle( int number =-1);
 
-   TrackPanel * GetTrackPanel(){return mTrackPanel;}
+   wxPanel *GetTopPanel() { return mTopPanel; }
+   TrackPanel * GetTrackPanel() {return mTrackPanel;}
 
    bool GetIsEmpty();
 
@@ -289,7 +291,9 @@ class AUDACITY_DLL_API AudacityProject final : public wxFrame,
    bool ProjectHasTracks();
 
    // Routine to estimate how many minutes of recording time are left on disk
-   int GetEstimatedRecordingMinsLeftOnDisk();
+   int GetEstimatedRecordingMinsLeftOnDisk(long lCaptureChannels = 0);
+   // Converts number of minutes to human readable format
+   wxString GetHoursMinsString(int iMinutes);
 
 #include "Menus.h"
 
@@ -311,12 +315,15 @@ class AUDACITY_DLL_API AudacityProject final : public wxFrame,
    void OnMenu(wxCommandEvent & event);
    void OnUpdateUI(wxUpdateUIEvent & event);
 
+   void MacShowUndockedToolbars(bool show);
    void OnActivate(wxActivateEvent & event);
+
    void OnMouseEvent(wxMouseEvent & event);
    void OnIconize(wxIconizeEvent &event);
    void OnSize(wxSizeEvent & event);
    void OnShow(wxShowEvent & event);
    void OnMove(wxMoveEvent & event);
+   void DoScroll();
    void OnScroll(wxScrollEvent & event);
    void OnCloseWindow(wxCloseEvent & event);
    void OnTimer(wxTimerEvent & event);
@@ -334,9 +341,12 @@ class AUDACITY_DLL_API AudacityProject final : public wxFrame,
 
    // Other commands
    static TrackList *GetClipboardTracks();
+   static void ClearClipboard();
    static void DeleteClipboard();
-   static void DeleteAllProjectsDeleteLock();
 
+   int GetProjectNumber(){ return mProjectNo;};
+   static int CountUnnamed();
+   static void RefreshAllTitles(bool bShowProjectNumbers );
    // checkActive is a temporary hack that should be removed as soon as we
    // get multiple effect preview working
    void UpdateMenus(bool checkActive = true);
@@ -346,6 +356,7 @@ class AUDACITY_DLL_API AudacityProject final : public wxFrame,
    void RefreshCursor();
    void SelectNone();
    void SelectAllIfNone();
+   void StopIfPaused();
    void Zoom(double level);
    void ZoomBy(double multiplier);
    void Rewind(bool shift);
@@ -363,8 +374,8 @@ class AUDACITY_DLL_API AudacityProject final : public wxFrame,
 
    void DoTrackMute(Track *pTrack, bool exclusive);
    void DoTrackSolo(Track *pTrack, bool exclusive);
-   void SetTrackGain(Track * track, LWSlider * slider);
-   void SetTrackPan(Track * track, LWSlider * slider);
+   void SetTrackGain(WaveTrack * track, LWSlider * slider);
+   void SetTrackPan(WaveTrack * track, LWSlider * slider);
 
    void RemoveTrack(Track * toRemove);
 
@@ -406,6 +417,7 @@ class AUDACITY_DLL_API AudacityProject final : public wxFrame,
 
    void SafeDisplayStatusMessage(const wxChar *msg);
 
+   bool MayScrollBeyondZero() const;
    double ScrollingLowerBoundTime() const;
    // How many pixels are covered by the period from lowermost scrollable time, to the given time:
    // PRL: Bug1197: we seem to need to compute all in double, to avoid differing results on Mac
@@ -442,6 +454,7 @@ class AUDACITY_DLL_API AudacityProject final : public wxFrame,
    DeviceToolBar *GetDeviceToolBar();
    EditToolBar *GetEditToolBar();
    MixerToolBar *GetMixerToolBar();
+   ScrubbingToolBar *GetScrubbingToolBar();
    SelectionBar *GetSelectionBar();
 #ifdef EXPERIMENTAL_SPECTRAL_EDITING
    SpectralSelectionBar *GetSpectralSelectionBar();
@@ -508,18 +521,14 @@ public:
    bool TryToMakeActionAllowed
       ( CommandFlag & flags, CommandFlag flagsRqd, CommandFlag mask );
 
-   ///Prevents DELETE from external thread - for e.g. use of GetActiveProject
-   static void AllProjectsDeleteLock();
-   static void AllProjectsDeleteUnlock();
-
    void PushState(const wxString &desc, const wxString &shortDesc); // use UndoPush::AUTOSAVE
    void PushState(const wxString &desc, const wxString &shortDesc, UndoPush flags);
    void RollbackState();
 
+
  private:
 
    void OnCapture(wxCommandEvent & evt);
-   void ClearClipboard();
    void InitialState();
    void ModifyState(bool bWantsAutoSave);    // if true, writes auto-save file. Should set only if you really want the state change restored after
                                              // a crash, as it can take many seconds for large (eg. 10 track-hours) projects
@@ -541,7 +550,11 @@ public:
 
    // The project's name and file info
    wxString mFileName;
-   DirManager *mDirManager; // MM: DirManager now created dynamically
+   bool mbLoadedFromAup;
+   std::shared_ptr<DirManager> mDirManager; // MM: DirManager now created dynamically
+
+   static int mProjectCounter;// global counter.
+   int mProjectNo; // count when this project was created.
 
    double mRate;
    sampleFormat mDefaultFormat;
@@ -551,19 +564,19 @@ public:
 
    // Tags (artist name, song properties, MP3 ID3 info, etc.)
    // The structure may be shared with undo history entries
-   // To keep undo working correctly, always replace this with a new duplicate
+   // To keep undo working correctly, always replace this with a NEW duplicate
    // BEFORE doing any editing of it!
    std::shared_ptr<Tags> mTags;
 
    // List of tracks and display info
-   TrackList *mTracks;
+   std::shared_ptr<TrackList> mTracks{ std::make_shared<TrackList>() };
 
    int mSnapTo;
    wxString mSelectionFormat;
    wxString mFrequencySelectionFormatName;
    wxString mBandwidthSelectionFormatName;
 
-   TrackList *mLastSavedTracks;
+   std::unique_ptr<TrackList> mLastSavedTracks;
 
    // Clipboard (static because it is shared by all projects)
    static std::unique_ptr<TrackList> msClipboard;
@@ -571,9 +584,12 @@ public:
    static double msClipT0;
    static double msClipT1;
 
+public:
+   ///Prevents DELETE from external thread - for e.g. use of GetActiveProject
    //shared by all projects
-   static ODLock *msAllProjectDeleteMutex;
+   static ODLock &AllProjectDeleteMutex();
 
+private:
    // History/Undo manager
    std::unique_ptr<UndoManager> mUndoManager;
    bool mDirty{ false };
@@ -586,14 +602,15 @@ public:
 
    // Window elements
 
-   wxTimer *mTimer;
+   std::unique_ptr<wxTimer> mTimer;
    long mLastStatusUpdateTime;
 
    wxStatusBar *mStatusBar;
 
    AdornedRulerPanel *mRuler{};
+   wxPanel *mTopPanel{};
    TrackPanel *mTrackPanel{};
-   TrackFactory *mTrackFactory{};
+   std::unique_ptr<TrackFactory> mTrackFactory{};
    wxPanel * mMainPanel;
    wxScrollBar *mHsbar;
    wxScrollBar *mVsbar;
@@ -649,6 +666,7 @@ public:
    bool mEmptyCanBeDirty;
 
    bool mSelectAllOnNone;
+   bool mStopIfWasPaused;
 
    bool mIsSyncLocked;
 
@@ -657,7 +675,7 @@ public:
    // See AudacityProject::OnActivate() for an explanation of this.
    wxWindow *mLastFocusedWindow{};
 
-   ImportXMLTagHandler* mImportXMLTagHandler{};
+   std::unique_ptr<ImportXMLTagHandler> mImportXMLTagHandler;
 
    // Last auto-save file name and path (empty if none)
    wxString mAutoSaveFileName;
@@ -672,7 +690,7 @@ public:
    wxString mRecoveryAutoSaveDataDir;
 
    // The handler that handles recovery of <recordingrecovery> tags
-   RecordingRecoveryHandler* mRecordingRecoveryHandler{};
+   std::unique_ptr<RecordingRecoveryHandler> mRecordingRecoveryHandler;
 
    // Dependencies have been imported and a warning should be shown on save
    bool mImportedDependencies{ false };
@@ -730,6 +748,7 @@ public:
 
       enum class Mode {
          Off,
+         Refresh,
          Centered,
          Right,
       };

@@ -30,6 +30,21 @@
 
 #include "../Experimental.h"
 
+int TracksPrefs::iPreferencePinned = -1;
+
+namespace {
+   const wxChar *PinnedHeadPreferenceKey()
+   {
+      return wxT("/AudioIO/PinnedHead");
+   }
+
+   bool PinnedHeadPreferenceDefault()
+   {
+      return false;
+   }
+}
+
+
 TracksPrefs::TracksPrefs(wxWindow * parent)
 :  PrefsPanel(parent, _("Tracks"))
 {
@@ -66,10 +81,10 @@ void TracksPrefs::Populate()
    // we don't display them by increasing integer values.
 
    mViewChoices.Add(_("Waveform"));
-   mViewCodes.Add(int(WaveTrack::Waveform));
+   mViewCodes.Add((int)(WaveTrack::Waveform));
 
    mViewChoices.Add(_("Waveform (dB)"));
-   mViewCodes.Add(int(WaveTrack::obsoleteWaveformDBDisplay));
+   mViewCodes.Add((int)(WaveTrack::obsoleteWaveformDBDisplay));
 
    mViewChoices.Add(_("Spectrogram"));
    mViewCodes.Add(WaveTrack::Spectrum);
@@ -89,7 +104,10 @@ void TracksPrefs::PopulateOrExchange(ShuttleGui & S)
 
    S.StartStatic(_("Display"));
    {
-      S.TieCheckBox(_("&Update display while playing"),
+      S.TieCheckBox(_("&Pinned Recording/Playback head"),
+                    PinnedHeadPreferenceKey(),
+                    PinnedHeadPreferenceDefault());
+      S.TieCheckBox(_("&Update display when Recording/Playback head unpinned"),
                     wxT("/GUI/AutoScroll"),
                     true);
       S.TieCheckBox(_("Automatically &fit tracks vertically zoomed"),
@@ -122,11 +140,11 @@ void TracksPrefs::PopulateOrExchange(ShuttleGui & S)
 
    S.StartStatic(_("Behaviors"));
    {
-      S.TieCheckBox(_("&Select all audio in project, if none selected"),
+      S.TieCheckBox(_("&Select then act on entire project, if no region selected"),
                     wxT("/GUI/SelectAllOnNone"),
                     true);
       /* i18n-hint: cut-lines are a lines indicating where to cut.*/
-      S.TieCheckBox(_("Enable cu&t lines"),
+      S.TieCheckBox(_("Enable cut &lines"),
                     wxT("/GUI/EnableCutLines"),
                     false);
       S.TieCheckBox(_("Enable &dragging of left and right selection edges"),
@@ -137,6 +155,9 @@ void TracksPrefs::PopulateOrExchange(ShuttleGui & S)
                     false);
       S.TieCheckBox(_("Editing a clip can &move other clips"),
                     wxT("/GUI/EditClipCanMove"),
+                    true);
+      S.TieCheckBox(_("&Type to create a label"),
+                    wxT("/GUI/TypeToCreateLabel"),
                     true);
 #ifdef EXPERIMENTAL_SCROLLING_LIMITS
       S.TieCheckBox(_("Enable scrolling left of &zero"),
@@ -158,6 +179,25 @@ void TracksPrefs::PopulateOrExchange(ShuttleGui & S)
       S.EndMultiColumn();
    }
    S.EndStatic();
+}
+
+bool TracksPrefs::GetPinnedHeadPreference()
+{
+   // JKC: Cache this setting as it is read many times during drawing, and otherwise causes screen flicker.
+   // Correct solution would be to re-write wxFileConfig to be efficient.
+   if( iPreferencePinned >= 0 )
+      return iPreferencePinned == 1;
+   bool bResult = gPrefs->ReadBool(PinnedHeadPreferenceKey(), PinnedHeadPreferenceDefault());
+   iPreferencePinned = bResult ? 1: 0;
+   return bResult;
+}
+
+void TracksPrefs::SetPinnedHeadPreference(bool value, bool flush)
+{
+   iPreferencePinned = value ? 1 :0;
+   gPrefs->Write(PinnedHeadPreferenceKey(), value);
+   if(flush)
+      gPrefs->Flush();
 }
 
 bool TracksPrefs::Apply()

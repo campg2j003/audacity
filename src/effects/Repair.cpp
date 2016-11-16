@@ -74,48 +74,38 @@ bool EffectRepair::Process()
    this->CopyInputTracks(); // Set up mOutputTracks. //v This may be too much copying for EffectRepair.
    bool bGoodResult = true;
 
-   SelectedTrackListOfKindIterator iter(Track::Wave, mOutputTracks);
+   SelectedTrackListOfKindIterator iter(Track::Wave, mOutputTracks.get());
    WaveTrack *track = (WaveTrack *) iter.First();
    int count = 0;
    while (track) {
+      const
       double trackStart = track->GetStartTime();
+      const double repair_t0 = std::max(mT0, trackStart);
+      const
       double trackEnd = track->GetEndTime();
-      double repair_t0 = mT0;
-      double repair_t1 = mT1;
-      repair_t0 = (repair_t0 < trackStart? trackStart: repair_t0);
-      repair_t1 = (repair_t1 > trackEnd? trackEnd: repair_t1);
-      if (repair_t0 < repair_t1) {  // selection is within track audio
-         double rate = track->GetRate();
-         double repair_deltat = repair_t1 - repair_t0;
-
-         double spacing = repair_deltat * 2;
-
-         if (spacing < 128. / rate)
-            spacing = 128. / rate;
-
-         double t0 = repair_t0 - spacing;
-         double t1 = repair_t1 + spacing;
-
-         t0 = t0 < trackStart? trackStart: t0;
-         t1 = t1 > trackEnd? trackEnd: t1;
-
-         repair_t0 = (repair_t0 < t0? t0: repair_t0);
-         repair_t1 = (repair_t1 > t1? t1: repair_t1);
-
-         sampleCount s0 = track->TimeToLongSamples(t0);
-         sampleCount repair0 = track->TimeToLongSamples(repair_t0);
-         sampleCount repair1 = track->TimeToLongSamples(repair_t1);
-         sampleCount s1 = track->TimeToLongSamples(t1);
-
-         sampleCount repairStart = (sampleCount)(repair0 - s0);
-         sampleCount repairLen = (sampleCount)(repair1 - repair0);
-         sampleCount len = (sampleCount)(s1 - s0);
-
+      const double repair_t1 = std::min(mT1, trackEnd);
+      const
+      double repair_deltat = repair_t1 - repair_t0;
+      if (repair_deltat > 0) {  // selection is within track audio
+         const auto repair0 = track->TimeToLongSamples(repair_t0);
+         const auto repair1 = track->TimeToLongSamples(repair_t1);
+         const auto repairLen = repair1 - repair0;
          if (repairLen > 128) {
             ::wxMessageBox(_("The Repair effect is intended to be used on very short sections of damaged audio (up to 128 samples).\n\nZoom in and select a tiny fraction of a second to repair."));
             bGoodResult = false;
             break;
          }
+
+         const double rate = track->GetRate();
+         const double spacing = std::max(repair_deltat * 2, 128. / rate);
+         const double t0 = std::max(repair_t0 - spacing, trackStart);
+         const double t1 = std::min(repair_t1 + spacing, trackEnd);
+
+         const auto s0 = track->TimeToLongSamples(t0);
+         const auto s1 = track->TimeToLongSamples(t1);
+         // The difference is at most 2 * 128:
+         const auto repairStart = (repair0 - s0).as_size_t();
+         const auto len = s1 - s0;
 
          if (s0 == repair0 && s1 == repair1) {
             ::wxMessageBox(_("Repair works by using audio data outside the selection region.\n\nPlease select a region that has audio touching at least one side of it.\n\nThe more surrounding audio, the better it performs."));
@@ -124,8 +114,12 @@ bool EffectRepair::Process()
             break;
          }
 
-         if (!ProcessOne(count, track,
-                         s0, len, repairStart, repairLen)) {
+         if (!ProcessOne(count, track, s0,
+                         // len is at most 5 * 128.
+                         len.as_size_t(),
+                         repairStart,
+                         // repairLen is at most 128.
+                         repairLen.as_size_t() )) {
             bGoodResult = false;
             break;
          }
@@ -141,8 +135,8 @@ bool EffectRepair::Process()
 
 bool EffectRepair::ProcessOne(int count, WaveTrack * track,
                               sampleCount start,
-                              sampleCount len,
-                              sampleCount repairStart, sampleCount repairLen)
+                              size_t len,
+                              size_t repairStart, size_t repairLen)
 {
    float *buffer = new float[len];
    track->Get((samplePtr) buffer, floatSample, start, len);

@@ -16,7 +16,6 @@
 /// to produce the desired crossfading
 
 #include "SampleFormat.h"
-#include "Resample.h"
 #include "WaveClip.h"
 
 
@@ -40,18 +39,17 @@ class CrossFader
   void SetTriangularCrossFade(){mType = FT_TRIANGULAR;};
   void SetExponentialCrossFade(){mType = FT_EXPONENTIAL;};
 
-  void AddClip( WaveClip * clip);
   void ClearClips();
   //Produces samples according to crossfading rules.
   bool  GetSamples(samplePtr buffer, sampleFormat format,
-                   sampleCount start, sampleCount len);
+                   sampleCount start, size_t len);
 
  protected:
-  WaveClipList mClips;
+  WaveClipHolders mClips;
 
  private:
 
-  bool CrossFadeMix(samplePtr buffer, sampleFormat format, sampleCount start, sampleCount len);
+  bool CrossFadeMix(samplePtr buffer, sampleFormat format, sampleCount start, size_t len);
 
   FadeType mType;
 

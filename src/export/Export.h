@@ -16,10 +16,10 @@
 #include <wx/dialog.h>
 #include <wx/dynarray.h>
 #include <wx/filename.h>
-#include <wx/panel.h>
 #include <wx/simplebook.h>
 #include "../Tags.h"
 #include "../SampleFormat.h"
+#include "../widgets/wxPanelWrapper.h"
 
 #include "FileDialog.h"
 
@@ -44,7 +44,7 @@ class AUDACITY_DLL_API FormatInfo
       // wxString mExtension;
       wxArrayString mExtensions;
       wxString mMask;
-      int mMaxChannels;
+      unsigned mMaxChannels;
       bool mCanMetaData;
 };
 
@@ -66,7 +66,7 @@ public:
    void AddExtension(const wxString &extension,int index);
    void SetExtensions(const wxArrayString & extensions, int index);
    void SetMask(const wxString & mask, int index);
-   void SetMaxChannels(int maxchannels, int index);
+   void SetMaxChannels(unsigned maxchannels, unsigned index);
    void SetCanMetaData(bool canmetadata, int index);
 
    virtual int GetFormatCount();
@@ -79,7 +79,7 @@ public:
     * @param index the sub-format for which the extension is required */
    virtual wxArrayString GetExtensions(int index = 0);
    virtual wxString GetMask(int index);
-   virtual int GetMaxChannels(int index);
+   virtual unsigned GetMaxChannels(int index);
    virtual bool GetCanMetaData(int index);
 
    virtual bool IsExtension(const wxString & ext, int index);
@@ -109,7 +109,7 @@ public:
     * respectively.
     */
    virtual int Export(AudacityProject *project,
-                       int channels,
+                       unsigned channels,
                        const wxString &fName,
                        bool selectedOnly,
                        double t0,
@@ -122,7 +122,7 @@ protected:
    std::unique_ptr<Mixer> CreateMixer(const WaveTrackConstArray &inputTracks,
          const TimeTrack *timeTrack,
          double startTime, double stopTime,
-         int numOutChannels, int outBufferSize, bool outInterleaved,
+         unsigned numOutChannels, int outBufferSize, bool outInterleaved,
          double outRate, sampleFormat outFormat,
          bool highQuality = true, MixerSpec *mixerSpec = NULL);
 
@@ -144,11 +144,12 @@ public:
    virtual ~Exporter();
 
    void SetFileDialogTitle( const wxString & DialogTitle );
+   void SetDefaultFormat( const wxString & Format ){ mFormatName = Format;};
    void RegisterPlugin(movable_ptr<ExportPlugin> &&plugin);
 
    bool Process(AudacityProject *project, bool selectedOnly,
                 double t0, double t1);
-   bool Process(AudacityProject *project, int numChannels,
+   bool Process(AudacityProject *project, unsigned numChannels,
                 const wxChar *type, const wxString & filename,
                 bool selectedOnly, double t0, double t1);
 
@@ -173,7 +174,6 @@ public:
    wxFileName GetAutoExportFileName();
 
 private:
-
    bool ExamineTracks();
    bool GetFilename();
    bool CheckFilename();
@@ -185,10 +185,11 @@ private:
    void OnFilterChanged(wxFileCtrlEvent & evt);
 
 private:
+   wxString mFormatName;
    FileDialog *mDialog;
    wxString mFileDialogTitle;
    AudacityProject *mProject;
-   MixerSpec *mMixerSpec;
+   std::unique_ptr<MixerSpec> mMixerSpec;
 
    ExportPluginArray mPlugins;
 
@@ -201,21 +202,21 @@ private:
    int mFormat;
    int mSubFormat;
    int mNumSelected;
-   int mNumLeft;
-   int mNumRight;
-   int mNumMono;
-   int mChannels;
+   unsigned mNumLeft;
+   unsigned mNumRight;
+   unsigned mNumMono;
+   unsigned mChannels;
    bool mSelectedOnly;
 
    wxSimplebook *mBook;
 
-   DECLARE_EVENT_TABLE();
+   DECLARE_EVENT_TABLE()
 };
 
 //----------------------------------------------------------------------------
 // ExportMixerPanel
 //----------------------------------------------------------------------------
-class ExportMixerPanel final : public wxPanel
+class ExportMixerPanel final : public wxPanelWrapper
 {
 public:
    ExportMixerPanel( MixerSpec *mixerSpec, wxArrayString trackNames,
@@ -227,7 +228,7 @@ public:
    void OnPaint(wxPaintEvent & event);
 
 private:
-   wxBitmap *mBitmap;
+   std::unique_ptr<wxBitmap> mBitmap;
    wxRect mEnvRect;
    int mWidth;
    int mHeight;
@@ -248,22 +249,22 @@ private:
 //----------------------------------------------------------------------------
 // ExportMixerDialog
 //----------------------------------------------------------------------------
-class ExportMixerDialog final : public wxDialog
+class ExportMixerDialog final : public wxDialogWrapper
 {
 public:
    // constructors and destructors
-   ExportMixerDialog( const TrackList * tracks, bool selectedOnly, int maxNumChannels,
+   ExportMixerDialog( const TrackList * tracks, bool selectedOnly, unsigned maxNumChannels,
          wxWindow *parent, wxWindowID id, const wxString &title,
          const wxPoint& pos = wxDefaultPosition,
          const wxSize& size = wxDefaultSize,
          long style = wxDEFAULT_DIALOG_STYLE | wxRESIZE_BORDER );
    virtual ~ExportMixerDialog();
 
-   MixerSpec* GetMixerSpec() { return mMixerSpec; }
+   MixerSpec* GetMixerSpec() { return mMixerSpec.get(); }
 
 private:
    wxStaticText *mChannelsText;
-   MixerSpec *mMixerSpec;
+   std::unique_ptr<MixerSpec> mMixerSpec;
    wxArrayString mTrackNames;
 
 private:

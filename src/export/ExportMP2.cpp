@@ -82,7 +82,7 @@ static int iBitrates[] = {
    192, 224, 256, 320, 384
 };
 
-class ExportMP2Options final : public wxPanel
+class ExportMP2Options final : public wxPanelWrapper
 {
 public:
    ExportMP2Options(wxWindow *parent, int format);
@@ -100,7 +100,7 @@ private:
 ///
 ///
 ExportMP2Options::ExportMP2Options(wxWindow *parent, int WXUNUSED(format))
-:  wxPanel(parent, wxID_ANY)
+:  wxPanelWrapper(parent, wxID_ANY)
 {
    for (unsigned int i=0; i < (sizeof(iBitrates)/sizeof(int)); i++)
    {
@@ -174,7 +174,7 @@ public:
 
    wxWindow *OptionsCreate(wxWindow *parent, int format);
    int Export(AudacityProject *project,
-               int channels,
+               unsigned channels,
                const wxString &fName,
                bool selectedOnly,
                double t0,
@@ -204,7 +204,7 @@ ExportMP2::ExportMP2()
 }
 
 int ExportMP2::Export(AudacityProject *project,
-   int channels, const wxString &fName,
+   unsigned channels, const wxString &fName,
    bool selectionOnly, double t0, double t1, MixerSpec *mixerSpec, const Tags *metadata,
    int WXUNUSED(subformat))
 {
@@ -274,7 +274,7 @@ int ExportMP2::Export(AudacityProject *project,
          wxString::Format(_("Exporting entire file at %ld kbps"), bitrate));
 
       while (updateResult == eProgressSuccess) {
-         sampleCount pcmNumSamples = mixer->Process(pcmBufferSize);
+         auto pcmNumSamples = mixer->Process(pcmBufferSize);
 
          if (pcmNumSamples == 0)
             break;

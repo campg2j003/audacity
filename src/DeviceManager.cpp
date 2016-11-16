@@ -268,10 +268,12 @@ void DeviceManager::Rescan()
       }
 
       // restart portaudio - this updates the device list
+      // FIXME: TRAP_ERR restarting PortAudio
       Pa_Terminate();
       Pa_Initialize();
    }
 
+   // FIXME: TRAP_ERR PaErrorCode not handled in ReScan()
    int nDevices = Pa_GetDeviceCount();
 
    //The heirarchy for devices is Host/device/source.
@@ -298,7 +300,7 @@ void DeviceManager::Rescan()
    // Hosts may have disappeared or appeared so a complete repopulate is needed.
    if (m_inited) {
       DeviceToolBar *dt;
-      for (size_t i = 0; i < gAudacityProjects.GetCount(); i++) {
+      for (size_t i = 0; i < gAudacityProjects.size(); i++) {
          dt = gAudacityProjects[i]->GetDeviceToolBar();
          dt->RefillCombos();
       }

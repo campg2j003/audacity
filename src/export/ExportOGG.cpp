@@ -42,7 +42,7 @@
 // ExportOGGOptions
 //----------------------------------------------------------------------------
 
-class ExportOGGOptions final : public wxPanel
+class ExportOGGOptions final : public wxPanelWrapper
 {
 public:
 
@@ -61,7 +61,7 @@ private:
 ///
 ///
 ExportOGGOptions::ExportOGGOptions(wxWindow *parent, int WXUNUSED(format))
-:  wxPanel(parent, wxID_ANY)
+:  wxPanelWrapper(parent, wxID_ANY)
 {
    mOggQualityUnscaled = gPrefs->Read(wxT("/FileFormats/OggExportQuality"),50)/10;
 
@@ -133,7 +133,7 @@ public:
    wxWindow *OptionsCreate(wxWindow *parent, int format) override;
 
    int Export(AudacityProject *project,
-               int channels,
+               unsigned channels,
                const wxString &fName,
                bool selectedOnly,
                double t0,
@@ -159,7 +159,7 @@ ExportOGG::ExportOGG()
 }
 
 int ExportOGG::Export(AudacityProject *project,
-                       int numChannels,
+                       unsigned numChannels,
                        const wxString &fName,
                        bool selectionOnly,
                        double t0,
@@ -195,7 +195,7 @@ int ExportOGG::Export(AudacityProject *project,
 
    // Encoding setup
    vorbis_info_init(&info);
-   vorbis_encode_init_vbr(&info, numChannels, int(rate + 0.5), quality);
+   vorbis_encode_init_vbr(&info, numChannels, (int)(rate + 0.5), quality);
 
    // Retrieve tags
    if (!FillComment(project, &comment, metadata)) {
@@ -255,7 +255,7 @@ int ExportOGG::Export(AudacityProject *project,
 
       while (updateResult == eProgressSuccess && !eos) {
          float **vorbis_buffer = vorbis_analysis_buffer(&dsp, SAMPLES_PER_RUN);
-         sampleCount samplesThisRun = mixer->Process(SAMPLES_PER_RUN);
+         auto samplesThisRun = mixer->Process(SAMPLES_PER_RUN);
 
          if (samplesThisRun == 0) {
             // Tell the library that we wrote 0 bytes - signalling the end.

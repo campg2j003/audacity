@@ -59,6 +59,7 @@ Grabber::Grabber(wxWindow * parent, wxWindowID id)
 {
    mOver = false;
    mPressed = false;
+   mAsSpacer = false;
 
    /* i18n-hint: A 'Grabber' is a region you can click and drag on
    It's used to drag a track around (when in multi-tool mode) rather
@@ -93,17 +94,38 @@ void Grabber::SendEvent(wxEventType type, const wxPoint & pos, bool escaping)
    parent->GetEventHandler()->AddPendingEvent(e);
 }
 
+void Grabber::SetAsSpacer( bool bIsSpacer ) { 
+   if( mAsSpacer != bIsSpacer ){
+      // HACK: Use a wider rectangle to also cover one pixel of space just to the right.
+      wxSize siz = GetSize();
+      siz.IncBy( bIsSpacer ? 1:-1, 0 );
+      SetSize( siz );
+   }
+   mAsSpacer = bIsSpacer;
+};
+
+
 //
 // Draw the grabber
 //
 void Grabber::DrawGrabber( wxDC & dc )
 {
    wxRect r = GetRect();
+   // PaintDC positions are relative to the grabber, not the parent window.
+   // So use 0,0 as origin for draw, so that the grabber draws right if 
+   // positioned in its parent at some non zero position.
+   r.SetPosition( wxPoint(0,0) );
    int y, left, right, top, bottom;
 
 #ifndef EXPERIMENTAL_THEMING
+
    AColor::Medium(&dc, mOver );
    dc.DrawRectangle(r);
+
+   // HACK: We used a wider rectangle to also cover one pixel of space just to the right.
+   if( mAsSpacer )
+      r.width -= 1;
+
 #else
    // Paint the background
    if( mOver )
@@ -121,6 +143,7 @@ void Grabber::DrawGrabber( wxDC & dc )
    }
 #endif
 
+
 #ifndef __WXMAC__
 
    // Add a box
@@ -132,6 +155,9 @@ void Grabber::DrawGrabber( wxDC & dc )
 
 #endif
 
+   // No bumps in a spacer grabber.
+   if( mAsSpacer )
+      return;
    // Calculate the bump rectangle
    r.Deflate(3, 3);
    if ((r.GetHeight() % 4) < 2) {
@@ -174,6 +200,8 @@ void Grabber::DrawGrabber( wxDC & dc )
 //
 void Grabber::PushButton(bool state )
 {
+   if( mAsSpacer )
+      return;
    wxRect r = GetRect();
    mOver = r.Contains(ScreenToClient(wxGetMousePosition()));
 
@@ -201,6 +229,15 @@ void Grabber::OnLeftDown(wxMouseEvent & event)
 //
 void Grabber::OnEnter(wxMouseEvent & WXUNUSED(event))
 {
+   // Bug 1201:  On Mac, unsetting and re-setting the tooltip may be needed
+   // to make it pop up when we want it.
+   const auto text = GetToolTipText();
+   UnsetToolTip();
+   SetToolTip(text);
+
+   if( mAsSpacer )
+      return;
+
    // Redraw highlighted
    mOver = true;
    Refresh(false);

@@ -15,6 +15,7 @@ Paul Licameli
 
 #include "AudioIO.h"
 #include "Internat.h"
+#include "Project.h"
 #include "prefs/GUISettings.h"
 #include "Prefs.h"
 #include "xml/XMLWriter.h"
@@ -89,6 +90,18 @@ bool ZoomInfo::ZoomOutAvailable() const
 void ZoomInfo::SetZoom(double pixelsPerSecond)
 {
    zoom = std::max(gMinZoom, std::min(gMaxZoom, pixelsPerSecond));
+#ifdef EXPERIMENTAL_DA
+   // Disable snapping if user zooms in a long way.
+   // Helps stop users be trapped in snap-to.
+   // The level chosen is in sample viewing range with samples
+   // still quite close together.
+   if( zoom > (gMaxZoom * 0.06  ))
+   {
+      AudacityProject * project = GetActiveProject();
+      if( project )
+         project->OnSnapToOff();
+   }
+#endif
 }
 
 void ZoomInfo::ZoomBy(double multiplier)
@@ -164,7 +177,7 @@ bool ViewInfo::ReadXMLAttribute(const wxChar *attr, const wxChar *value)
    if (!wxStrcmp(attr, wxT("vpos"))) {
       long longVpos;
       wxString(value).ToLong(&longVpos);
-      vpos = int(longVpos);
+      vpos = (int)(longVpos);
       return true;
    }
 

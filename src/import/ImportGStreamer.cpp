@@ -130,7 +130,7 @@ struct GStreamContext
    GstElement    *mSink{};         // Application sink
    bool           mUse{};          // True if this stream should be imported
    TrackHolders   mChannels;     // Array of WaveTrack pointers, one for each channel
-   gint           mNumChannels{};  // Number of channels
+   unsigned       mNumChannels{};  // Number of channels
    gdouble        mSampleRate{};   // Sample rate
    GstString      mType;         // Audio type
    sampleFormat   mFmt{ floatSample };          // Sample format
@@ -170,7 +170,7 @@ public:
    bool Init();
 
    wxString GetFileDescription();
-   int GetFileUncompressedBytes();
+   ByteCount GetFileUncompressedBytes() override;
 
    ///! Called by Import.cpp
    ///\return number of readable audio streams in the file
@@ -261,10 +261,10 @@ public:
 // ----------------------------------------------------------------------------
 // Instantiate GStreamerImportPlugin and add to the list of known importers
 void
-GetGStreamerImportPlugin(ImportPluginList *importPluginList,
-                         UnusableImportPluginList * WXUNUSED(unusableImportPluginList))
+GetGStreamerImportPlugin(ImportPluginList &importPluginList,
+                         UnusableImportPluginList & WXUNUSED(unusableImportPluginList))
 {
-   wxLogMessage(wxT("Audacity is built against GStreamer version %d.%d.%d-%d"),
+   wxLogMessage(_TS("Audacity is built against GStreamer version %d.%d.%d-%d"),
                 GST_VERSION_MAJOR,
                 GST_VERSION_MINOR,
                 GST_VERSION_MICRO,
@@ -293,17 +293,14 @@ GetGStreamerImportPlugin(ImportPluginList *importPluginList,
                 nano);
 
    // Instantiate plugin
-   GStreamerImportPlugin *plug = new GStreamerImportPlugin();
+   auto plug = make_movable<GStreamerImportPlugin>();
 
    // No supported extensions...no gstreamer plugins installed
    if (plug->GetSupportedExtensions().GetCount() == 0)
-   {
-      delete plug;
       return;
-   }
 
    // Add to list of importers
-   importPluginList->Append(plug);
+   importPluginList.push_back( std::move(plug) );
 }
 
 // ============================================================================
@@ -421,6 +418,7 @@ std::unique_ptr<ImportFileHandle> GStreamerImportPlugin::Open(const wxString &fi
       return nullptr;
    }
 
+   // This std::move is needed to "upcast" the pointer type
    return std::move(handle);
 }
 
@@ -765,7 +763,7 @@ GStreamerImportFileHandle::OnNewSample(GStreamContext *c, GstSample *sample)
 
       // Allocate the track array
       c->mChannels.resize(c->mNumChannels);
-      if (gint(c->mChannels.size()) != c->mNumChannels)
+      if (c->mChannels.size() != c->mNumChannels)
       {
          WARN(mPipeline.get(), ("OnNewSample: unable to allocate track array"));
          return;
@@ -814,10 +812,10 @@ GStreamerImportFileHandle::OnNewSample(GStreamContext *c, GstSample *sample)
    });
 
    // Cache a few items
-   int nChannels = c->mNumChannels;
+   auto nChannels = c->mNumChannels;
    sampleFormat fmt = c->mFmt;
    samplePtr data = (samplePtr) info.data;
-   sampleCount samples = info.size / nChannels / SAMPLE_SIZE(fmt);
+   size_t samples = info.size / nChannels / SAMPLE_SIZE(fmt);
 
    // Add sample data to tracks...depends on interleaved src data
    for (int chn = 0; chn < nChannels; chn++)
@@ -1008,8 +1006,8 @@ GStreamerImportFileHandle::GetFileDescription()
 
 // ----------------------------------------------------------------------------
 // Return number of uncompressed bytes in file...doubtful this is possible
-int
-GStreamerImportFileHandle::GetFileUncompressedBytes()
+auto
+GStreamerImportFileHandle::GetFileUncompressedBytes() -> ByteCount
 {
    return 0;
 }
@@ -1130,11 +1128,11 @@ GStreamerImportFileHandle::Import(TrackFactory *trackFactory,
       return updateResult;
    }
 
-   // Grah the streams lock
+   // Grab the streams lock
    g_mutex_locker locker{ mStreamsLock };
 
    // Count the total number of tracks collected
-   int outNumTracks = 0;
+   unsigned outNumTracks = 0;
    for (guint s = 0; s < mStreams.size(); s++)
    {
       GStreamContext *c = mStreams[s].get();

@@ -121,7 +121,7 @@ enum WindowTypes {
 
 const struct WindowTypesInfo {
    const wxChar *name;
-   int minSteps;
+   unsigned minSteps;
    double inCoefficients[3];
    double outCoefficients[3];
    double productConstantTerm;
@@ -159,7 +159,7 @@ enum  NoiseReductionChoice {
 class EffectNoiseReduction::Statistics
 {
 public:
-   Statistics(int spectrumSize, double rate, int windowTypes)
+   Statistics(size_t spectrumSize, double rate, int windowTypes)
       : mRate(rate)
       , mWindowSize((spectrumSize - 1) * 2)
       , mWindowTypes(windowTypes)
@@ -175,7 +175,7 @@ public:
    // Noise profile statistics follow
 
    double mRate; // Rate of profile track(s) -- processed tracks must match
-   int mWindowSize;
+   size_t mWindowSize;
    int mWindowTypes;
 
    int mTotalWindows;
@@ -206,8 +206,8 @@ public:
    bool PrefsIO(bool read);
    bool Validate() const;
 
-   int WindowSize() const { return 1 << (3 + mWindowSizeChoice); }
-   int StepsPerWindow() const { return 1 << (1 + mStepsPerWindowChoice); }
+   size_t WindowSize() const { return 1u << (3 + mWindowSizeChoice); }
+   unsigned StepsPerWindow() const { return 1u << (1 + mStepsPerWindowChoice); }
 
    bool      mDoProfile;
 
@@ -270,7 +270,7 @@ private:
 
    void StartNewTrack();
    void ProcessSamples(Statistics &statistics,
-      WaveTrack *outputTrack, sampleCount len, float *buffer);
+      WaveTrack *outputTrack, size_t len, float *buffer);
    void FillFirstHistoryWindow();
    void ApplyFreqSmoothing(FloatVector &gains);
    void GatherStatistics(Statistics &statistics);
@@ -286,7 +286,7 @@ private:
 
    const double mSampleRate;
 
-   const int mWindowSize;
+   const size_t mWindowSize;
    // These have that size:
    HFFT     hFFT;
    FloatVector mFFTBuffer;
@@ -296,16 +296,16 @@ private:
    FloatVector mInWindow;
    FloatVector mOutWindow;
 
-   const int mSpectrumSize;
+   const size_t mSpectrumSize;
    FloatVector mFreqSmoothingScratch;
-   const int mFreqSmoothingBins;
+   const size_t mFreqSmoothingBins;
    // When spectral selection limits the affected band:
    int mBinLow;  // inclusive lower bound
    int mBinHigh; // exclusive upper bound
 
    const int mNoiseReductionChoice;
-   const int mStepsPerWindow;
-   const int mStepSize;
+   const unsigned mStepsPerWindow;
+   const size_t mStepSize;
    const int mMethod;
    const double mNewSensitivity;
 
@@ -319,13 +319,13 @@ private:
    float     mNoiseAttenFactor;
    float     mOldSensitivityFactor;
 
-   int       mNWindowsToExamine;
-   int       mCenter;
-   int       mHistoryLen;
+   unsigned  mNWindowsToExamine;
+   unsigned  mCenter;
+   unsigned  mHistoryLen;
 
    struct Record
    {
-      Record(int spectrumSize)
+      Record(size_t spectrumSize)
          : mSpectrums(spectrumSize)
          , mGains(spectrumSize)
          , mRealFFTs(spectrumSize - 1)
@@ -338,7 +338,7 @@ private:
       FloatVector mRealFFTs;
       FloatVector mImagFFTs;
    };
-   std::vector<Record*> mQueue;
+   std::vector<movable_ptr<Record>> mQueue;
 };
 
 /****************************************************************//**
@@ -412,7 +412,7 @@ private:
 };
 
 EffectNoiseReduction::EffectNoiseReduction()
-: mSettings(new EffectNoiseReduction::Settings)
+: mSettings(std::make_unique<EffectNoiseReduction::Settings>())
 {
    Init();
 }
@@ -600,7 +600,7 @@ bool EffectNoiseReduction::Process()
 
    this->CopyInputTracks(); // Set up mOutputTracks.
 
-   SelectedTrackListOfKindIterator iter(Track::Wave, mOutputTracks);
+   SelectedTrackListOfKindIterator iter(Track::Wave, mOutputTracks.get());
    WaveTrack *track = (WaveTrack *) iter.First();
    if (!track)
       return false;
@@ -608,9 +608,9 @@ bool EffectNoiseReduction::Process()
    // Initialize statistics if gathering them, or check for mismatched (advanced)
    // settings if reducing noise.
    if (mSettings->mDoProfile) {
-      int spectrumSize = 1 + mSettings->WindowSize() / 2;
-      mStatistics.reset
-         (new Statistics(spectrumSize, track->GetRate(), mSettings->mWindowTypes));
+      size_t spectrumSize = 1 + mSettings->WindowSize() / 2;
+      mStatistics = std::make_unique<Statistics>
+         (spectrumSize, track->GetRate(), mSettings->mWindowTypes);
    }
    else if (mStatistics->mWindowSize != mSettings->WindowSize()) {
       // possible only with advanced settings
@@ -641,8 +641,6 @@ bool EffectNoiseReduction::Process()
 EffectNoiseReduction::Worker::~Worker()
 {
    EndFFT(hFFT);
-   for(int ii = 0, nn = mQueue.size(); ii < nn; ++ii)
-      delete mQueue[ii];
 }
 
 bool EffectNoiseReduction::Worker::Process
@@ -666,9 +664,9 @@ bool EffectNoiseReduction::Worker::Process
       double t1 = std::min(trackEnd, mT1);
 
       if (t1 > t0) {
-         sampleCount start = track->TimeToLongSamples(t0);
-         sampleCount end = track->TimeToLongSamples(t1);
-         sampleCount len = (sampleCount)(end - start);
+         auto start = track->TimeToLongSamples(t0);
+         auto end = track->TimeToLongSamples(t1);
+         auto len = end - start;
 
          if (!ProcessOne(effect, statistics, factory,
                          count, track, start, len))
@@ -706,7 +704,7 @@ void EffectNoiseReduction::Worker::ApplyFreqSmoothing(FloatVector &gains)
       gains[ii] = log(gains[ii]);
 
    for (int ii = 0; ii < mSpectrumSize; ++ii) {
-      const int j0 = std::max(0, ii - mFreqSmoothingBins);
+      const int j0 = std::max(0, ii - (int)mFreqSmoothingBins);
       const int j1 = std::min(mSpectrumSize - 1, ii + mFreqSmoothingBins);
       for(int jj = j0; jj <= j1; ++jj) {
          mFreqSmoothingScratch[ii] += gains[jj];
@@ -738,7 +736,7 @@ EffectNoiseReduction::Worker::Worker
 
 , mSpectrumSize(1 + mWindowSize / 2)
 , mFreqSmoothingScratch(mSpectrumSize)
-, mFreqSmoothingBins(int(settings.mFreqSmoothingBands))
+, mFreqSmoothingBins((int)(settings.mFreqSmoothingBands))
 , mBinLow(0)
 , mBinHigh(mSpectrumSize)
 
@@ -765,8 +763,8 @@ EffectNoiseReduction::Worker::Worker
 #endif
 
    const double noiseGain = -settings.mNoiseGain;
-   const int nAttackBlocks = 1 + (int)(settings.mAttackTime * sampleRate / mStepSize);
-   const int nReleaseBlocks = 1 + (int)(settings.mReleaseTime * sampleRate / mStepSize);
+   const unsigned nAttackBlocks = 1 + (int)(settings.mAttackTime * sampleRate / mStepSize);
+   const unsigned nReleaseBlocks = 1 + (int)(settings.mReleaseTime * sampleRate / mStepSize);
    // Applies to amplitudes, divide by 20:
    mNoiseAttenFactor = DB_TO_LINEAR(noiseGain);
    // Apply to gain factors which apply to amplitudes, divide by 20:
@@ -796,8 +794,8 @@ EffectNoiseReduction::Worker::Worker
    }
 
    mQueue.resize(mHistoryLen);
-   for (int ii = 0; ii < mHistoryLen; ++ii)
-      mQueue[ii] = new Record(mSpectrumSize);
+   for (unsigned ii = 0; ii < mHistoryLen; ++ii)
+      mQueue[ii] = make_movable<Record>(mSpectrumSize);
 
    // Create windows
 
@@ -825,7 +823,7 @@ EffectNoiseReduction::Worker::Worker
          const double c1 = coefficients[1];
          const double c2 = coefficients[2];
          mInWindow.resize(mWindowSize);
-         for (int ii = 0; ii < mWindowSize; ++ii)
+         for (size_t ii = 0; ii < mWindowSize; ++ii)
             mInWindow[ii] = m *
             (c0 + c1 * cos((2.0*M_PI*ii) / mWindowSize)
                 + c2 * cos((4.0*M_PI*ii) / mWindowSize));
@@ -842,7 +840,7 @@ EffectNoiseReduction::Worker::Worker
       case WT_HAMMING_INV_HAMMING:
          {
          mOutWindow.resize(mWindowSize);
-         for (int ii = 0; ii < mWindowSize; ++ii)
+         for (size_t ii = 0; ii < mWindowSize; ++ii)
                mOutWindow[ii] = multiplier / mInWindow[ii];
          }
          break;
@@ -854,10 +852,10 @@ EffectNoiseReduction::Worker::Worker
             const double c1 = coefficients[1];
             const double c2 = coefficients[2];
             mOutWindow.resize(mWindowSize);
-            for (int ii = 0; ii < mWindowSize; ++ii)
+            for (size_t ii = 0; ii < mWindowSize; ++ii)
                mOutWindow[ii] = multiplier *
-               (c0 + c1 * cos((2.0*M_PI*ii) / mWindowSize)
-               + c2 * cos((4.0*M_PI*ii) / mWindowSize));
+               (c0 + c1 * cos((2.0 * M_PI * ii) / mWindowSize)
+               + c2 * cos((4.0 * M_PI * ii) / mWindowSize));
          }
          break;
       }
@@ -867,7 +865,7 @@ EffectNoiseReduction::Worker::Worker
 void EffectNoiseReduction::Worker::StartNewTrack()
 {
    float *pFill;
-   for(int ii = 0; ii < mHistoryLen; ++ii) {
+   for(unsigned ii = 0; ii < mHistoryLen; ++ii) {
       Record &record = *mQueue[ii];
 
       pFill = &record.mSpectrums[0];
@@ -893,7 +891,7 @@ void EffectNoiseReduction::Worker::StartNewTrack()
    {
       // We do not want leading zero padded windows
       mInWavePos = 0;
-      mOutStepCount = -(mHistoryLen - 1);
+      mOutStepCount = -(int)(mHistoryLen - 1);
    }
    else
    {
@@ -902,10 +900,10 @@ void EffectNoiseReduction::Worker::StartNewTrack()
       // samples of wave data:
       mInWavePos = mWindowSize - mStepSize;
       // This starts negative, to count up until the queue fills:
-      mOutStepCount = -(mHistoryLen - 1)
+      mOutStepCount = -(int)(mHistoryLen - 1)
          // ... and then must pass over the padded windows,
          // before the first full window:
-         - (mStepsPerWindow - 1);
+         - (int)(mStepsPerWindow - 1);
    }
 
    mInSampleCount = 0;
@@ -913,10 +911,10 @@ void EffectNoiseReduction::Worker::StartNewTrack()
 
 void EffectNoiseReduction::Worker::ProcessSamples
 (Statistics &statistics, WaveTrack *outputTrack,
- sampleCount len, float *buffer)
+ size_t len, float *buffer)
 {
    while (len && mOutStepCount * mStepSize < mInSampleCount) {
-      int avail = std::min(int(len), mWindowSize - mInWavePos);
+      auto avail = std::min(len, mWindowSize - mInWavePos);
       memmove(&mInWaveBuffer[mInWavePos], buffer, avail * sizeof(float));
       buffer += avail;
       len -= avail;
@@ -943,7 +941,7 @@ void EffectNoiseReduction::Worker::FillFirstHistoryWindow()
 {
    // Transform samples to frequency domain, windowed as needed
    if (mInWindow.size() > 0)
-      for (int ii = 0; ii < mWindowSize; ++ii)
+      for (size_t ii = 0; ii < mWindowSize; ++ii)
          mFFTBuffer[ii] = mInWaveBuffer[ii] * mInWindow[ii];
    else
       memmove(&mFFTBuffer[0], &mInWaveBuffer[0], mWindowSize * sizeof(float));
@@ -958,7 +956,7 @@ void EffectNoiseReduction::Worker::FillFirstHistoryWindow()
       float *pImag = &record.mImagFFTs[1];
       float *pPower = &record.mSpectrums[1];
       int *pBitReversed = &hFFT->BitReversed[1];
-      const int last = mSpectrumSize - 1;
+      const auto last = mSpectrumSize - 1;
       for (int ii = 1; ii < last; ++ii) {
          const int kk = *pBitReversed++;
          const float realPart = *pReal++ = mFFTBuffer[kk];
@@ -986,9 +984,7 @@ void EffectNoiseReduction::Worker::FillFirstHistoryWindow()
 
 void EffectNoiseReduction::Worker::RotateHistoryWindows()
 {
-   Record *save = mQueue[mHistoryLen - 1];
-   mQueue.pop_back();
-   mQueue.insert(mQueue.begin(), save);
+   std::rotate(mQueue.begin(), mQueue.end() - 1, mQueue.end());
 }
 
 void EffectNoiseReduction::Worker::FinishTrackStatistics(Statistics &statistics)
@@ -1047,7 +1043,7 @@ void EffectNoiseReduction::Worker::GatherStatistics(Statistics &statistics)
    // level achieved at that frequency for a minimum of
    // mMinSignalBlocks blocks in a row - the max of a min.
 
-   int finish = mHistoryLen;
+   auto finish = mHistoryLen;
 
    {
       // old statistics
@@ -1055,7 +1051,7 @@ void EffectNoiseReduction::Worker::GatherStatistics(Statistics &statistics)
       float *pThreshold = &statistics.mNoiseThreshold[0];
       for (int jj = 0; jj < mSpectrumSize; ++jj) {
          float min = *pPower++;
-         for (int ii = 1; ii < finish; ++ii)
+         for (unsigned ii = 1; ii < finish; ++ii)
             min = std::min(min, mQueue[ii]->mSpectrums[jj]);
          *pThreshold = std::max(*pThreshold, min);
          ++pThreshold;
@@ -1074,7 +1070,7 @@ bool EffectNoiseReduction::Worker::Classify(const Statistics &statistics, int ba
    case DM_OLD_METHOD:
       {
          float min = mQueue[0]->mSpectrums[band];
-         for (int ii = 1; ii < mNWindowsToExamine; ++ii)
+         for (unsigned ii = 1; ii < mNWindowsToExamine; ++ii)
             min = std::min(min, mQueue[ii]->mSpectrums[band]);
          return min <= mOldSensitivityFactor * statistics.mNoiseThreshold[band];
       }
@@ -1098,7 +1094,7 @@ bool EffectNoiseReduction::Worker::Classify(const Statistics &statistics, int ba
       else if (mNWindowsToExamine == 5)
       {
          float greatest = 0.0, second = 0.0, third = 0.0;
-         for (int ii = 0; ii < mNWindowsToExamine; ++ii) {
+         for (unsigned ii = 0; ii < mNWindowsToExamine; ++ii) {
             const float power = mQueue[ii]->mSpectrums[band];
             if (power >= greatest)
                third = second, second = greatest, greatest = power;
@@ -1120,7 +1116,7 @@ bool EffectNoiseReduction::Worker::Classify(const Statistics &statistics, int ba
          // should be less prone to distortions and more prone to
          // chimes.
          float greatest = 0.0, second = 0.0;
-         for (int ii = 0; ii < mNWindowsToExamine; ++ii) {
+         for (unsigned ii = 0; ii < mNWindowsToExamine; ++ii) {
             const float power = mQueue[ii]->mSpectrums[band];
             if (power >= greatest)
                second = greatest, greatest = power;
@@ -1175,7 +1171,7 @@ void EffectNoiseReduction::Worker::ReduceNoise
       // First, the attack, which goes backward in time, which is,
       // toward higher indices in the queue.
       for (int jj = 0; jj < mSpectrumSize; ++jj) {
-         for (int ii = mCenter + 1; ii < mHistoryLen; ++ii) {
+         for (unsigned ii = mCenter + 1; ii < mHistoryLen; ++ii) {
             const float minimum =
                std::max(mNoiseAttenFactor,
                         mQueue[ii - 1]->mGains[jj] * mOneBlockAttack);
@@ -1206,9 +1202,9 @@ void EffectNoiseReduction::Worker::ReduceNoise
    }
 
 
-   if (mOutStepCount >= -(mStepsPerWindow - 1)) {
+   if (mOutStepCount >= -(int)(mStepsPerWindow - 1)) {
       Record &record = *mQueue[mHistoryLen - 1];  // end of the queue
-      const int last = mSpectrumSize - 1;
+      const auto last = mSpectrumSize - 1;
 
       if (mNoiseReductionChoice != NRC_ISOLATE_NOISE)
          // Apply frequency smoothing to output gain
@@ -1221,7 +1217,7 @@ void EffectNoiseReduction::Worker::ReduceNoise
          const float *pReal = &record.mRealFFTs[1];
          const float *pImag = &record.mImagFFTs[1];
          float *pBuffer = &mFFTBuffer[2];
-         int nn = mSpectrumSize - 2;
+         auto nn = mSpectrumSize - 2;
          if (mNoiseReductionChoice == NRC_LEAVE_RESIDUE) {
             for (; nn--;) {
                // Subtract the gain we would otherwise apply from 1, and
@@ -1277,7 +1273,7 @@ void EffectNoiseReduction::Worker::ReduceNoise
       }
 
       // Shift the remainder over.
-      memmove(buffer, buffer + mStepSize, sizeof(float)*(mWindowSize - mStepSize));
+      memmove(buffer, buffer + mStepSize, sizeof(float) * (mWindowSize - mStepSize));
       std::fill(buffer + mWindowSize - mStepSize, buffer + mWindowSize, 0.0f);
    }
 }
@@ -1295,15 +1291,17 @@ bool EffectNoiseReduction::Worker::ProcessOne
    if(!mDoProfile)
       outputTrack = factory.NewWaveTrack(track->GetSampleFormat(), track->GetRate());
 
-   sampleCount bufferSize = track->GetMaxBlockSize();
+   auto bufferSize = track->GetMaxBlockSize();
    FloatVector buffer(bufferSize);
 
    bool bLoopSuccess = true;
-   sampleCount blockSize;
-   sampleCount samplePos = start;
+   auto samplePos = start;
    while (bLoopSuccess && samplePos < start + len) {
       //Get a blockSize of samples (smaller than the size of the buffer)
-      blockSize = std::min(start + len - samplePos, track->GetBestBlockSize(samplePos));
+      const auto blockSize = limitSampleBufferSize(
+         track->GetBestBlockSize(samplePos),
+         start + len - samplePos
+      );
 
       //Get the samples from the track and put them in the buffer
       track->Get((samplePtr)&buffer[0], floatSample, samplePos, blockSize);
@@ -1314,7 +1312,9 @@ bool EffectNoiseReduction::Worker::ProcessOne
 
       // Update the Progress meter, let user cancel
       bLoopSuccess = 
-         !effect.TrackProgress(count, (samplePos - start) / (double)len);
+         !effect.TrackProgress(count,
+                               ( samplePos - start ).as_double() /
+                               len.as_double() );
    }
 
    if (bLoopSuccess) {
@@ -1415,7 +1415,7 @@ struct ControlInfo {
    wxString Text(double value) const
    {
       if (formatAsInt)
-         return wxString::Format(format, int(value));
+         return wxString::Format(format, (int)(value));
       else
          return wxString::Format(format, value);
    }
@@ -1486,7 +1486,7 @@ return table;
 } // namespace
 
 
-BEGIN_EVENT_TABLE(EffectNoiseReduction::Dialog, wxDialog)
+BEGIN_EVENT_TABLE(EffectNoiseReduction::Dialog, wxDialogWrapper)
    EVT_BUTTON(wxID_OK, EffectNoiseReduction::Dialog::OnReduceNoise)
    EVT_BUTTON(wxID_CANCEL, EffectNoiseReduction::Dialog::OnCancel)
    EVT_BUTTON(ID_EFFECT_PREVIEW, EffectNoiseReduction::Dialog::OnPreview)

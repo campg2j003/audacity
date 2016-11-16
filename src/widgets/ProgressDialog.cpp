@@ -29,6 +29,8 @@
 #include "../Audacity.h"
 
 #include "../MemoryX.h"
+#include <algorithm>
+
 #include <wx/defs.h>
 #include <wx/app.h>
 #include <wx/button.h>
@@ -980,7 +982,7 @@ static const unsigned char beep[] =
 /// Methods for ProgressDialog
 ////////////////////////////////////////////////////////////
 
-BEGIN_EVENT_TABLE(ProgressDialog, wxDialog)
+BEGIN_EVENT_TABLE(ProgressDialog, wxDialogWrapper)
    EVT_BUTTON(wxID_CANCEL, ProgressDialog::OnCancel)
    EVT_BUTTON(wxID_OK, ProgressDialog::OnStop)
    EVT_CLOSE(ProgressDialog::OnCloseWindow)
@@ -990,7 +992,7 @@ END_EVENT_TABLE()
 // Constructor
 //
 ProgressDialog::ProgressDialog()
-:  wxDialog()
+:  wxDialogWrapper()
 {
    Init();
 }
@@ -999,7 +1001,7 @@ ProgressDialog::ProgressDialog(const wxString & title,
                                const wxString & message /* = wxEmptyString*/,
                                int flags /* = pdlgDefaultFlags */,
                                const wxString & sRemainingLabelText /* = wxEmptyString */)
-:  wxDialog()
+:  wxDialogWrapper()
 {
    Init();
 
@@ -1013,11 +1015,7 @@ ProgressDialog::~ProgressDialog()
 {
    // Delete the window disabler before hiding the dialog to allow
    // focus to return to the original window.
-   if (mDisable)
-   {
-      delete mDisable;
-      mDisable = NULL;
-   }
+   mDisable.reset();
 
    if (IsShown())
    {
@@ -1070,6 +1068,33 @@ void ProgressDialog::Init()
 #endif
 }
 
+// Add a new text column each time this is called.
+void ProgressDialog::AddMessageAsColumn(wxBoxSizer * pSizer, const wxString & sText, bool bFirstColumn) {
+
+   // Assuming that we don't want empty columns, bail out if there is no text.
+   if (sText.IsEmpty())
+   {
+      return;
+   }
+
+   // Create a statictext object and add to the sizer
+   wxStaticText* oText = safenew wxStaticText(this,
+                                              wxID_ANY,
+                                              sText,
+                                              wxDefaultPosition,
+                                              wxDefaultSize,
+                                              wxALIGN_LEFT);
+   oText->SetName(sText); // fix for bug 577 (NVDA/Narrator screen readers do not read static text in dialogs)
+
+   // If this is the first column then set the mMessage pointer so non-TimerRecord usages
+   // will still work correctly
+   if (bFirstColumn) {
+      mMessage = oText;
+   }
+
+   pSizer->Add(oText, 1, wxEXPAND | wxALL, 5);
+}
+
 bool ProgressDialog::Create(const wxString & title,
                             const wxString & message /* = wxEmptyString */,
                             int flags /* = pdlgDefaultFlags */,
@@ -1080,9 +1105,9 @@ bool ProgressDialog::Create(const wxString & title,
    // Set this boolean to indicate if we are using the "Elapsed" labels
    m_bShowElapsedTime = !(flags & pdlgHideElapsedTime);
    // Set this boolean to indicate if we confirm the Cancel/Stop actions
-   m_bConfirmAction = (flags & pdlgConfirmStopCancel);
+   m_bConfirmAction = (flags & pdlgConfirmStopCancel)!=0;
 
-   bool success = wxDialog::Create(parent,
+   bool success = wxDialogWrapper::Create(parent,
                                    wxID_ANY,
                                    title,
                                    wxDefaultPosition,
@@ -1093,70 +1118,63 @@ bool ProgressDialog::Create(const wxString & title,
    {
       return false;
    }
-   SetName(GetTitle());
 
-   wxWindow *w;
-   wxSize ds;
+   SetName(GetTitle()); // This was added for NVDA screen reader and may now be redundant.
+   SetExtraStyle(GetExtraStyle() | wxWS_EX_TRANSIENT);   // Ancient code. Is it still required?
 
-   SetExtraStyle(GetExtraStyle() | wxWS_EX_TRANSIENT);
-
-   wxFlexGridSizer *g;
-   wxBoxSizer *h;
    {
-      auto v = std::make_unique<wxBoxSizer>(wxVERTICAL);
+      wxWindow *window;
+      wxArrayString arMessages(wxSplit(message, ProgressDialog::ColoumnSplitMarker));
 
-      mMessage = safenew wxStaticText(this,
-         wxID_ANY,
-         message,
-         wxDefaultPosition,
-         wxDefaultSize,
-         wxALIGN_LEFT);
-      mMessage->SetName(message); // fix for bug 577 (NVDA/Narrator screen readers do not read static text in dialogs)
-      v->Add(mMessage, 1, wxEXPAND | wxALL, 10);
-      ds.y += mMessage->GetSize().y + 20;
+      // There may be more than one column, so create a BoxSizer container
+      auto uColSizer = std::make_unique<wxBoxSizer>(wxHORIZONTAL);
+      auto colSizer = uColSizer.get();
 
-      //
-      //
-      //
+      for (size_t column = 0; column < arMessages.GetCount(); column++) {
+         bool bFirstCol = (column == 0);
+         AddMessageAsColumn(colSizer, arMessages[column], bFirstCol);
+      }
+
+      // and put message column(s) into a main vertical sizer.
+      auto vertSizer = std::make_unique<wxBoxSizer>(wxVERTICAL);
+      vertSizer->Add(uColSizer.release(), 1, wxEXPAND | wxALL, 10);
+
       mGauge = safenew wxGauge(this,
-         wxID_ANY,
-         1000,
-         wxDefaultPosition,
-         wxDefaultSize,
-         wxGA_HORIZONTAL);
-      v->Add(mGauge, 0, wxEXPAND | wxLEFT | wxRIGHT | wxBOTTOM, 10);
-      ds.y += mGauge->GetSize().y + 10;
+                               wxID_ANY,
+                               1000,
+                               wxDefaultPosition,
+                               wxDefaultSize,
+                               wxGA_HORIZONTAL);
+      vertSizer->Add(mGauge, 0, wxEXPAND | wxLEFT | wxRIGHT | wxBOTTOM, 10);
 
-      //
-      //
-      //
       {
-         auto ug = std::make_unique<wxFlexGridSizer>(2, 2, 10, 10);
-         // MY: Only one row if we are not going to show the elapsed time
+         auto uGridSizer = std::make_unique<wxFlexGridSizer>(2, 2, 10, 10);
+         // Only one row if we are not going to show the elapsed time
          if (m_bShowElapsedTime == false) {
-            ug = std::make_unique<wxFlexGridSizer>(1, 2, 10, 10);
+            uGridSizer = std::make_unique<wxFlexGridSizer>(1, 2, 10, 10);
          }
-         g = ug.get();
+         auto gridSizer = uGridSizer.get();
 
          if (m_bShowElapsedTime) {
-            w = safenew wxStaticText(this,
-               wxID_ANY,
-               _("Elapsed Time:"),
-               wxDefaultPosition,
-               wxDefaultSize,
-               wxALIGN_RIGHT);
-            w->SetName(w->GetLabel()); // fix for bug 577 (NVDA/Narrator screen readers do not read static text in dialogs)
-            g->Add(w, 0, wxALIGN_RIGHT);
+            window = safenew wxStaticText(this,
+                                          wxID_ANY,
+                                          _("Elapsed Time:"),
+                                          wxDefaultPosition,
+                                          wxDefaultSize,
+                                          wxALIGN_RIGHT);
+
+            window->SetName(window->GetLabel()); // fix for bug 577 (NVDA/Narrator screen readers do not read static text in dialogs)
+            gridSizer->Add(window, 0, wxALIGN_RIGHT);
 
             mElapsed = safenew wxStaticText(this,
-               wxID_ANY,
-               wxT("00:00:00"),
-               wxDefaultPosition,
-               wxDefaultSize,
-               wxALIGN_LEFT);
+                                            wxID_ANY,
+                                            wxT("00:00:00"),
+                                            wxDefaultPosition,
+                                            wxDefaultSize,
+                                            wxALIGN_LEFT);
+
             mElapsed->SetName(mElapsed->GetLabel()); // fix for bug 577 (NVDA/Narrator screen readers do not read static text in dialogs)
-            g->Add(mElapsed, 0, wxALIGN_LEFT);
-            ds.y += mElapsed->GetSize().y + 10;
+            gridSizer->Add(mElapsed, 0, wxALIGN_LEFT);
          }
 
          // Customised "Remaining" label text
@@ -1165,72 +1183,52 @@ bool ProgressDialog::Create(const wxString & title,
             sRemainingText = _("Remaining Time:");
          }
 
-         //
-         //
-         //
-         w = safenew wxStaticText(this,
-            wxID_ANY,
-            sRemainingText,
-            wxDefaultPosition,
-            wxDefaultSize,
-            wxALIGN_RIGHT);
-         w->SetName(w->GetLabel()); // fix for bug 577 (NVDA/Narrator screen readers do not read static text in dialogs)
-         g->Add(w, 0, wxALIGN_RIGHT);
+         window = safenew wxStaticText(this,
+                                       wxID_ANY,
+                                       sRemainingText,
+                                       wxDefaultPosition,
+                                       wxDefaultSize,
+                                       wxALIGN_RIGHT);
+         window->SetName(window->GetLabel()); // fix for bug 577 (NVDA/Narrator screen readers do not read static text in dialogs)
+         gridSizer->Add(window, 0, wxALIGN_RIGHT);
 
          mRemaining = safenew wxStaticText(this,
-            wxID_ANY,
-            wxT("00:00:00"),
-            wxDefaultPosition,
-            wxDefaultSize,
-            wxALIGN_LEFT);
+                                           wxID_ANY,
+                                           wxT("00:00:00"),
+                                           wxDefaultPosition,
+                                           wxDefaultSize,
+                                           wxALIGN_LEFT);
          mRemaining->SetName(mRemaining->GetLabel()); // fix for bug 577 (NVDA/Narrator screen readers do not read static text in dialogs)
-         g->Add(mRemaining, 0, wxALIGN_LEFT);
+         gridSizer->Add(mRemaining, 0, wxALIGN_LEFT);
 
-         v->Add(ug.release(), 0, wxALIGN_CENTER | wxLEFT | wxRIGHT | wxBOTTOM, 10);
+         vertSizer->Add(uGridSizer.release(), 0, wxALIGN_CENTER | wxLEFT | wxRIGHT | wxBOTTOM, 10);
       }
-
-      ds.y += mRemaining->GetSize().y + 10;
 
       {
-         auto uh = std::make_unique<wxBoxSizer>(wxHORIZONTAL);
-         h = uh.get();
+         auto uButtonBar = std::make_unique<wxBoxSizer>(wxHORIZONTAL);
+         auto buttonBarSizer = uButtonBar.get();
 
-         if (!(flags & pdlgHideStopButton))
-         {
-            w = safenew wxButton(this, wxID_OK, _("Stop"));
-            h->Add(w, 0, wxRIGHT, 10);
+         if (!(flags & pdlgHideStopButton)) {
+            window = safenew wxButton(this, wxID_OK, _("Stop"));
+            buttonBarSizer->Add(window, 0, wxRIGHT, 10);
          }
-
-         if (!(flags & pdlgHideCancelButton))
-         {
-            w = safenew wxButton(this, wxID_CANCEL, _("Cancel"));
-            h->Add(w, 0, wxRIGHT, 10);
+         if (!(flags & pdlgHideCancelButton)) {
+            window = safenew wxButton(this, wxID_CANCEL, _("Cancel"));
+            buttonBarSizer->Add(window, 0, wxRIGHT, 10);
          }
-
-         v->Add(uh.release(), 0, wxALIGN_RIGHT | wxRIGHT | wxBOTTOM, 10);
+         vertSizer->Add(uButtonBar.release(), 0, wxALIGN_RIGHT | wxRIGHT | wxBOTTOM, 10);
       }
 
-      SetSizer(v.release());
+      SetSizerAndFit(vertSizer.release());
    }
    Layout();
-
-   ds.x = wxMax(g->GetSize().x, h->GetSize().x) + 10;
-   ds.y += w->GetSize().y + 10;
 
    wxClientDC dc(this);
    dc.GetMultiLineTextExtent(message, &mLastW, &mLastH);
 
-   // MY: Add a little bit more width when we have TABs to stop words wrapping
+   // Add a little bit more width when we have TABs to stop words wrapping
    int iTabFreq = wxMax((message.Freq('\t') - 1), 0); 
    mLastW = mLastW + (iTabFreq * 8);
-
-#if defined(__WXMAC__)
-   mMessage->SetMinSize(wxSize(mLastW, mLastH));
-#endif
-
-   // The 300 really isn't needed, but it keeps it at a decent width.
-   ds.x = wxMax(wxMax(wxMax(ds.x, mLastW) + 20, wxMax(ds.y, mLastH)), 300);
-   SetClientSize(ds);
 
    Centre(wxCENTER_FRAME | wxBOTH);
 
@@ -1247,7 +1245,7 @@ bool ProgressDialog::Create(const wxString & title,
    SetTransparent(0);
    mIsTransparent = true;
 
-   wxDialog::Show(true);
+   wxDialogWrapper::Show(true);
 
    // Even though we won't necessarily show the dialog due to the 500ms
    // delay, we MUST disable other windows/menus anyway since we run the risk
@@ -1261,7 +1259,7 @@ bool ProgressDialog::Create(const wxString & title,
    // while waiting for Timer Record to start -- and then also
    // while it's recording, it has a ProgressDialog, so really,
    // no editing in any project until Timer Record finishes.
-   mDisable = new wxWindowDisabler(this);
+   mDisable = std::make_unique<wxWindowDisabler>(this);
 
    return true;
 }
@@ -1335,7 +1333,7 @@ int ProgressDialog::Update(int value, const wxString & message)
       mLastUpdate = now;
    }
 
-   wxDialog::Update();
+   wxDialogWrapper::Update();
 
    // Copied from wx 3.0.2 generic progress dialog
    //
@@ -1476,7 +1474,7 @@ void ProgressDialog::SetMessage(const wxString & message)
          // to the existing dimensions.
          ds.x = wxMax(wxMax(ds.x, mLastW), wxMax(ds.y, mLastH));
          SetClientSize(ds);
-         wxDialog::Update();
+         wxDialogWrapper::Update();
       }
    }
 }
@@ -1486,15 +1484,12 @@ void ProgressDialog::SetMessage(const wxString & message)
 //
 bool ProgressDialog::SearchForWindow(const wxWindowList & list, const wxWindow *searchfor) const
 {
-   wxWindowList::compatibility_iterator node = list.GetFirst();
-   while (node)
+   for (auto win : list)
    {
-      wxWindow *win = node->GetData();
       if (win == searchfor || SearchForWindow(win->GetChildren(), searchfor))
       {
          return true;
       }
-      node = node->GetNext();
    }
 
    return false;
@@ -1558,7 +1553,7 @@ void ProgressDialog::Beep() const
    }
 }
 
-// MY: Confirm action taken by user.
+// Confirm action taken by user.
 // Returns TRUE if the user confirms Yes
 bool ProgressDialog::ConfirmAction(const wxString & sPrompt,
                                    const wxString & sTitle,

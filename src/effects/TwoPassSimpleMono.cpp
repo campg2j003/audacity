@@ -47,7 +47,7 @@ bool EffectTwoPassSimpleMono::Process()
 bool EffectTwoPassSimpleMono::ProcessPass()
 {
    //Iterate over each track
-   SelectedTrackListOfKindIterator iter(Track::Wave, mOutputTracks);
+   SelectedTrackListOfKindIterator iter(Track::Wave, mOutputTracks.get());
    WaveTrack *track = (WaveTrack *) iter.First();
    mCurTrackNum = 0;
    while (track) {
@@ -64,8 +64,8 @@ bool EffectTwoPassSimpleMono::ProcessPass()
       if (mCurT1 > mCurT0) {
 
          //Transform the marker timepoints to samples
-         sampleCount start = track->TimeToLongSamples(mCurT0);
-         sampleCount end = track->TimeToLongSamples(mCurT1);
+         auto start = track->TimeToLongSamples(mCurT0);
+         auto end = track->TimeToLongSamples(mCurT1);
 
          //Get the track rate and samples
          mCurRate = track->GetRate();
@@ -95,30 +95,25 @@ bool EffectTwoPassSimpleMono::ProcessPass()
 
 
 //ProcessOne() takes a track, transforms it to bunch of buffer-blocks,
-//and executes ProcessSimpleMono on these blocks
+//and executes TwoBufferProcessPass1 or TwoBufferProcessPass2 on these blocks
 bool EffectTwoPassSimpleMono::ProcessOne(WaveTrack * track,
                                          sampleCount start, sampleCount end)
 {
    bool ret;
-   sampleCount s, samples1, samples2, tmpcount;
    float *tmpfloat;
 
    //Get the length of the buffer (as double). len is
    //used simple to calculate a progress meter, so it is easier
    //to make it a double now than it is to do it later
-   double len = (double)(end - start);
-   sampleCount maxblock = track->GetMaxBlockSize();
+   auto len = (end - start).as_double();
+   auto maxblock = track->GetMaxBlockSize();
 
    //Initiate a processing buffer.  This buffer will (most likely)
    //be shorter than the length of the track being processed.
    float *buffer1 = new float[maxblock];
    float *buffer2 = new float[maxblock];
-   samples1 = track->GetBestBlockSize(start);
-   if(start + samples1 > end)
-      samples1 = end - start;
-
-   if(samples1 > maxblock)
-      samples1 = maxblock;
+   auto samples1 =  limitSampleBufferSize(
+      std::min( maxblock, track->GetBestBlockSize(start) ), end - start );
 
    //Get the samples from the track and put them in the buffer
    track->Get((samplePtr) buffer1, floatSample, start, samples1);
@@ -138,17 +133,13 @@ bool EffectTwoPassSimpleMono::ProcessOne(WaveTrack * track,
 
    //Go through the track one buffer at a time. s counts which
    //sample the current buffer starts at.
-   s = start + samples1;
+   auto s = start + samples1;
    while (s < end) {
       //Get a block of samples (smaller than the size of the buffer)
-      samples2 = track->GetBestBlockSize(s);
-
-      if(samples2 > maxblock)
-         samples2 = maxblock;
-
       //Adjust the block size if it is the final block in the track
-      if (s + samples2 > end)
-         samples2 = end - s;
+      auto samples2 = limitSampleBufferSize(
+         std::min( track->GetBestBlockSize(s), maxblock ), end - s
+      );
 
       //Get the samples from the track and put them in the buffer
       track->Get((samplePtr) buffer2, floatSample, s, samples2);
@@ -174,9 +165,13 @@ bool EffectTwoPassSimpleMono::ProcessOne(WaveTrack * track,
 
       //Update the Progress meter
       if (mSecondPassDisabled)
-         ret = TotalProgress((mCurTrackNum + (s-start)/len) / GetNumWaveTracks());
+         ret = TotalProgress(
+            (mCurTrackNum + (s-start).as_double()/len) /
+            GetNumWaveTracks());
       else
-         ret = TotalProgress((mCurTrackNum + (s-start)/len + GetNumWaveTracks()*mPass)/ (GetNumWaveTracks()*2));
+         ret = TotalProgress(
+            (mCurTrackNum + (s-start).as_double()/len + GetNumWaveTracks()*mPass) /
+            (GetNumWaveTracks()*2));
       if (ret) {
          delete[]buffer1;
          delete[]buffer2;
@@ -189,9 +184,7 @@ bool EffectTwoPassSimpleMono::ProcessOne(WaveTrack * track,
       buffer1 = buffer2;
       buffer2 = tmpfloat;
 
-      tmpcount = samples1;
-      samples1 = samples2;
-      samples2 = tmpcount;
+      std::swap(samples1, samples2);
    }
 
    // Send the last buffer with a NULL pointer for the current buffer

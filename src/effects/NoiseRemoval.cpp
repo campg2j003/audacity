@@ -212,7 +212,7 @@ bool EffectNoiseRemoval::Process()
    this->CopyInputTracks(); // Set up mOutputTracks.
    bool bGoodResult = true;
 
-   SelectedTrackListOfKindIterator iter(Track::Wave, mOutputTracks);
+   SelectedTrackListOfKindIterator iter(Track::Wave, mOutputTracks.get());
    WaveTrack *track = (WaveTrack *) iter.First();
    int count = 0;
    while (track) {
@@ -222,9 +222,9 @@ bool EffectNoiseRemoval::Process()
       double t1 = mT1 > trackEnd? trackEnd: mT1;
 
       if (t1 > t0) {
-         sampleCount start = track->TimeToLongSamples(t0);
-         sampleCount end = track->TimeToLongSamples(t1);
-         sampleCount len = (sampleCount)(end - start);
+         auto start = track->TimeToLongSamples(t0);
+         auto end = track->TimeToLongSamples(t1);
+         auto len = end - start;
 
          if (!ProcessOne(count, track, start, len)) {
             Cleanup();
@@ -363,10 +363,10 @@ void EffectNoiseRemoval::StartNewTrack()
 
    mInputPos = 0;
    mInSampleCount = 0;
-   mOutSampleCount = -(mWindowSize / 2) * (mHistoryLen - 1);
+   mOutSampleCount = -(int)((mWindowSize / 2) * (mHistoryLen - 1));
 }
 
-void EffectNoiseRemoval::ProcessSamples(sampleCount len, float *buffer)
+void EffectNoiseRemoval::ProcessSamples(size_t len, float *buffer)
 {
    int i;
 
@@ -572,19 +572,18 @@ bool EffectNoiseRemoval::ProcessOne(int count, WaveTrack * track,
       mOutputTrack = mFactory->NewWaveTrack(track->GetSampleFormat(),
                                             track->GetRate());
 
-   sampleCount bufferSize = track->GetMaxBlockSize();
+   auto bufferSize = track->GetMaxBlockSize();
    float *buffer = new float[bufferSize];
 
    bool bLoopSuccess = true;
-   sampleCount blockSize;
-   sampleCount samplePos = start;
+   auto samplePos = start;
    while (samplePos < start + len) {
       //Get a blockSize of samples (smaller than the size of the buffer)
-      blockSize = track->GetBestBlockSize(samplePos);
-
       //Adjust the block size if it is the final block in the track
-      if (samplePos + blockSize > start + len)
-         blockSize = start + len - samplePos;
+      const auto blockSize = limitSampleBufferSize(
+         track->GetBestBlockSize(samplePos),
+         start + len - samplePos
+      );
 
       //Get the samples from the track and put them in the buffer
       track->Get((samplePtr)buffer, floatSample, samplePos, blockSize);
@@ -662,7 +661,7 @@ enum {
 #define TIME_MAX 100    // Corresponds to 1.000 seconds
 
 
-BEGIN_EVENT_TABLE(NoiseRemovalDialog,wxDialog)
+BEGIN_EVENT_TABLE(NoiseRemovalDialog,wxDialogWrapper)
    EVT_BUTTON(wxID_OK, NoiseRemovalDialog::OnRemoveNoise)
    EVT_BUTTON(wxID_CANCEL, NoiseRemovalDialog::OnCancel)
    EVT_BUTTON(ID_EFFECT_PREVIEW, NoiseRemovalDialog::OnPreview)

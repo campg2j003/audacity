@@ -59,7 +59,6 @@ but little else.
 #include <wx/arrstr.h>
 #include <wx/filename.h>
 #include <wx/string.h>
-#include <wx/list.h>
 #include "../MemoryX.h"
 
 #include "../widgets/ProgressDialog.h"
@@ -148,8 +147,10 @@ public:
    virtual wxString GetFileDescription() = 0;
 
    // Return an estimate of how many bytes the file will occupy once
-   // imported
-   virtual int GetFileUncompressedBytes() = 0;
+   // imported.  In principle this may exceed main memory, so don't use
+   // size_t.
+   using ByteCount = unsigned long long;
+   virtual ByteCount GetFileUncompressedBytes() = 0;
 
    // do the actual import, creating whatever tracks are necessary with
    // the TrackFactory and calling the progress callback every iteration
@@ -196,8 +197,5 @@ private:
    wxString mFormatName;
    wxArrayString mExtensions;
 };
-
-WX_DECLARE_LIST(ImportPlugin, ImportPluginList);
-WX_DECLARE_LIST(UnusableImportPlugin, UnusableImportPluginList);
 
 #endif

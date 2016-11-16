@@ -37,7 +37,7 @@ bool Generator::Process()
    // Iterate over the tracks
    bool bGoodResult = true;
    int ntrack = 0;
-   TrackListIterator iter(mOutputTracks);
+   TrackListIterator iter(mOutputTracks.get());
    Track* t = iter.First();
 
    while (t != NULL)
@@ -78,7 +78,7 @@ bool Generator::Process()
             else {
                // Transfer the data from the temporary track to the actual one
                tmp->Flush();
-               SetTimeWarper(new StepTimeWarper(mT0+GetDuration(), GetDuration()-(mT1-mT0)));
+               SetTimeWarper(std::make_unique<StepTimeWarper>(mT0+GetDuration(), GetDuration()-(mT1-mT0)));
                bGoodResult = track->ClearAndPaste(p->GetSel0(), p->GetSel1(), &*tmp, true,
                      false, GetTimeWarper());
             }
@@ -119,14 +119,12 @@ bool BlockGenerator::GenerateTrack(WaveTrack *tmp,
 {
    bool bGoodResult = true;
    numSamples = track.TimeToLongSamples(GetDuration());
-   sampleCount i = 0;
+   decltype(numSamples) i = 0;
    float *data = new float[tmp->GetMaxBlockSize()];
-   sampleCount block = 0;
 
    while ((i < numSamples) && bGoodResult) {
-      block = tmp->GetBestBlockSize(i);
-      if (block > (numSamples - i))
-         block = numSamples - i;
+      const auto block =
+         limitSampleBufferSize( tmp->GetBestBlockSize(i), numSamples - i );
 
       GenerateBlock(data, track, block);
 
@@ -135,7 +133,9 @@ bool BlockGenerator::GenerateTrack(WaveTrack *tmp,
       i += block;
 
       // Update the progress meter
-      if (TrackProgress(ntrack, (double)i / numSamples))
+      if (TrackProgress(ntrack,
+                        i.as_double() /
+                        numSamples.as_double()))
          bGoodResult = false;
    }
    delete[] data;

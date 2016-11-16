@@ -39,11 +39,11 @@ public:
 
    // EffectClientInterface implementation
 
-   int GetAudioInCount() override;
-   int GetAudioOutCount() override;
+   unsigned GetAudioInCount() override;
+   unsigned GetAudioOutCount() override;
    bool ProcessInitialize(sampleCount totalLen, ChannelNames chanMap = NULL) override;
    bool ProcessFinalize() override;
-   sampleCount ProcessBlock(float **inBlock, float **outBlock, sampleCount blockLen) override;
+   size_t ProcessBlock(float **inBlock, float **outBlock, size_t blockLen) override;
    bool GetAutomationParameters(EffectAutomationParameters & parms) override;
    bool SetAutomationParameters(EffectAutomationParameters & parms) override;
 
@@ -59,8 +59,8 @@ private:
    double delay;
    double decay;
    float *history;
-   sampleCount histPos;
-   sampleCount histLen;
+   size_t histPos;
+   size_t histLen;
 };
 
 #endif // __AUDACITY_EFFECT_ECHO__

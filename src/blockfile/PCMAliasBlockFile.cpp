@@ -31,9 +31,9 @@ PCMAliasBlockFile::PCMAliasBlockFile(
       wxFileNameWrapper &&fileName,
       wxFileNameWrapper &&aliasedFileName,
       sampleCount aliasStart,
-      sampleCount aliasLen, int aliasChannel)
-: AliasBlockFile(std::move(fileName), std::move(aliasedFileName),
-                 aliasStart, aliasLen, aliasChannel)
+      size_t aliasLen, int aliasChannel)
+: AliasBlockFile{ std::move(fileName), std::move(aliasedFileName),
+                  aliasStart, aliasLen, aliasChannel }
 {
    AliasBlockFile::WriteSummary();
 }
@@ -42,9 +42,9 @@ PCMAliasBlockFile::PCMAliasBlockFile(
       wxFileNameWrapper&& fileName,
       wxFileNameWrapper&& aliasedFileName,
       sampleCount aliasStart,
-      sampleCount aliasLen, int aliasChannel,bool writeSummary)
-: AliasBlockFile(std::move(fileName), std::move(aliasedFileName),
-                 aliasStart, aliasLen, aliasChannel)
+      size_t aliasLen, int aliasChannel,bool writeSummary)
+: AliasBlockFile{ std::move(fileName), std::move(aliasedFileName),
+                  aliasStart, aliasLen, aliasChannel }
 {
    if(writeSummary)
       AliasBlockFile::WriteSummary();
@@ -54,11 +54,11 @@ PCMAliasBlockFile::PCMAliasBlockFile(
       wxFileNameWrapper &&existingSummaryFileName,
       wxFileNameWrapper &&aliasedFileName,
       sampleCount aliasStart,
-      sampleCount aliasLen, int aliasChannel,
+      size_t aliasLen, int aliasChannel,
       float min, float max, float rms)
-: AliasBlockFile(std::move(existingSummaryFileName), std::move(aliasedFileName),
-                 aliasStart, aliasLen,
-                 aliasChannel, min, max, rms)
+: AliasBlockFile{ std::move(existingSummaryFileName), std::move(aliasedFileName),
+                  aliasStart, aliasLen,
+                  aliasChannel, min, max, rms }
 {
 }
 
@@ -73,8 +73,8 @@ PCMAliasBlockFile::~PCMAliasBlockFile()
 /// @param format The format to convert the data into
 /// @param start  The offset within the block to begin reading
 /// @param len    The number of samples to read
-int PCMAliasBlockFile::ReadData(samplePtr data, sampleFormat format,
-                                sampleCount start, sampleCount len) const
+size_t PCMAliasBlockFile::ReadData(samplePtr data, sampleFormat format,
+                                size_t start, size_t len) const
 {
    SF_INFO info;
 
@@ -99,6 +99,8 @@ int PCMAliasBlockFile::ReadData(samplePtr data, sampleFormat format,
             // libsndfile can't (under Windows).
             sf.reset(SFCall<SNDFILE*>(sf_open_fd, f.fd(), SFM_READ, &info, FALSE));
          }
+         // FIXME: TRAP_ERR failure of wxFile open incompletely handled in PCMAliasBlockFile::ReadData.
+
       }
 
       if (!sf) {
@@ -114,10 +116,15 @@ int PCMAliasBlockFile::ReadData(samplePtr data, sampleFormat format,
    }
    mSilentAliasLog=FALSE;
 
-   SFCall<sf_count_t>(sf_seek, sf.get(), mAliasStart + start, SEEK_SET);
+   // Third party library has its own type alias, check it
+   static_assert(sizeof(sampleCount::type) <= sizeof(sf_count_t),
+                 "Type sf_count_t is too narrow to hold a sampleCount");
+   SFCall<sf_count_t>(sf_seek, sf.get(),
+                      ( mAliasStart + start ).as_long_long(), SEEK_SET);
+   wxASSERT(info.channels >= 0);
    SampleBuffer buffer(len * info.channels, floatSample);
 
-   int framesRead = 0;
+   size_t framesRead = 0;
 
    if (format == int16Sample &&
        !sf_subtype_more_than_16_bits(info.format)) {
@@ -148,12 +155,11 @@ int PCMAliasBlockFile::ReadData(samplePtr data, sampleFormat format,
 /// the summary data to a NEW file.
 ///
 /// @param newFileName The filename to copy the summary data to.
-BlockFile *PCMAliasBlockFile::Copy(wxFileNameWrapper &&newFileName)
+BlockFilePtr PCMAliasBlockFile::Copy(wxFileNameWrapper &&newFileName)
 {
-   BlockFile *newBlockFile = new PCMAliasBlockFile(std::move(newFileName),
-                                                   wxFileNameWrapper{mAliasedFileName}, mAliasStart,
-                                                   mLen, mAliasChannel,
-                                                   mMin, mMax, mRMS);
+   auto newBlockFile = make_blockfile<PCMAliasBlockFile>
+      (std::move(newFileName), wxFileNameWrapper{mAliasedFileName},
+       mAliasStart, mLen, mAliasChannel, mMin, mMax, mRMS);
 
    return newBlockFile;
 }
@@ -164,7 +170,8 @@ void PCMAliasBlockFile::SaveXML(XMLWriter &xmlFile)
 
    xmlFile.WriteAttr(wxT("summaryfile"), mFileName.GetFullName());
    xmlFile.WriteAttr(wxT("aliasfile"), mAliasedFileName.GetFullPath());
-   xmlFile.WriteAttr(wxT("aliasstart"), mAliasStart);
+   xmlFile.WriteAttr(wxT("aliasstart"),
+                     mAliasStart.as_long_long());
    xmlFile.WriteAttr(wxT("aliaslen"), mLen);
    xmlFile.WriteAttr(wxT("aliaschannel"), mAliasChannel);
    xmlFile.WriteAttr(wxT("min"), mMin);
@@ -177,7 +184,7 @@ void PCMAliasBlockFile::SaveXML(XMLWriter &xmlFile)
 // BuildFromXML methods should always return a BlockFile, not NULL,
 // even if the result is flawed (e.g., refers to nonexistent file),
 // as testing will be done in DirManager::ProjectFSCK().
-BlockFile *PCMAliasBlockFile::BuildFromXML(DirManager &dm, const wxChar **attrs)
+BlockFilePtr PCMAliasBlockFile::BuildFromXML(DirManager &dm, const wxChar **attrs)
 {
    wxFileNameWrapper summaryFileName;
    wxFileNameWrapper aliasFileName;
@@ -185,6 +192,7 @@ BlockFile *PCMAliasBlockFile::BuildFromXML(DirManager &dm, const wxChar **attrs)
    float min = 0.0f, max = 0.0f, rms = 0.0f;
    double dblValue;
    long nValue;
+   long long nnValue;
 
    while(*attrs)
    {
@@ -216,11 +224,15 @@ BlockFile *PCMAliasBlockFile::BuildFromXML(DirManager &dm, const wxChar **attrs)
             // but we want to keep the reference to the missing file because it's a good path string.
             aliasFileName.Assign(strValue);
       }
+      else if ( !wxStricmp(attr, wxT("aliasstart")) )
+      {
+         if (XMLValueChecker::IsGoodInt64(strValue) &&
+             strValue.ToLongLong(&nnValue) && (nnValue >= 0))
+            aliasStart = nnValue;
+      }
       else if (XMLValueChecker::IsGoodInt(strValue) && strValue.ToLong(&nValue))
       {  // integer parameters
-         if (!wxStricmp(attr, wxT("aliasstart")) && (nValue >= 0))
-            aliasStart = nValue;
-         else if (!wxStricmp(attr, wxT("aliaslen")) && (nValue >= 0))
+         if (!wxStricmp(attr, wxT("aliaslen")) && (nValue >= 0))
             aliasLen = nValue;
          else if (!wxStricmp(attr, wxT("aliaschannel")) && XMLValueChecker::IsValidChannel(aliasChannel))
             aliasChannel = nValue;
@@ -247,9 +259,9 @@ BlockFile *PCMAliasBlockFile::BuildFromXML(DirManager &dm, const wxChar **attrs)
       }
    }
 
-   return new PCMAliasBlockFile(std::move(summaryFileName), std::move(aliasFileName),
-                                aliasStart, aliasLen, aliasChannel,
-                                min, max, rms);
+   return make_blockfile<PCMAliasBlockFile>
+      (std::move(summaryFileName), std::move(aliasFileName),
+       aliasStart, aliasLen, aliasChannel, min, max, rms);
 }
 
 void PCMAliasBlockFile::Recover(void)

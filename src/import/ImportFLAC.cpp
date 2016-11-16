@@ -22,6 +22,9 @@
 
 *//*******************************************************************/
 
+#include "../Audacity.h"
+#include "ImportFLAC.h"
+
 // For compilers that support precompilation, includes "wx/wx.h".
 #include <wx/wxprec.h>
 
@@ -33,7 +36,6 @@
 #include <wx/defs.h>
 #include <wx/intl.h>    // needed for _("translated stings") even if we
                         // don't have libflac available
-#include "../Audacity.h"
 
 #include "Import.h"
 #include "ImportPlugin.h"
@@ -54,19 +56,18 @@ static const wxChar *exts[] =
 
 #ifndef USE_LIBFLAC
 
-void GetFLACImportPlugin(ImportPluginList *importPluginList,
-                        UnusableImportPluginList *unusableImportPluginList)
+void GetFLACImportPlugin(ImportPluginList &importPluginList,
+                        UnusableImportPluginList &unusableImportPluginList)
 {
-   UnusableImportPlugin* flacIsUnsupported =
-      new UnusableImportPlugin(DESC, wxArrayString(WXSIZEOF(exts), exts));
-
-   unusableImportPluginList->Append(flacIsUnsupported);
+   unusableImportPluginList.push_back(
+      make_movable<UnusableImportPlugin>
+         (DESC, wxArrayString(WXSIZEOF(exts), exts))
+   );
 }
 
 #else /* USE_LIBFLAC */
 
 #include "../Internat.h"
-#include "ImportFLAC.h"
 
 #include <wx/string.h>
 #include <wx/utils.h>
@@ -152,7 +153,7 @@ public:
    bool Init();
 
    wxString GetFileDescription();
-   int GetFileUncompressedBytes();
+   ByteCount GetFileUncompressedBytes() override;
    int Import(TrackFactory *trackFactory, TrackHolders &outTracks,
               Tags *tags) override;
 
@@ -168,7 +169,7 @@ public:
 
 private:
    sampleFormat          mFormat;
-   MyFLACFile           *mFile;
+   std::unique_ptr<MyFLACFile> mFile;
    wxFFile               mHandle;
    unsigned long         mSampleRate;
    unsigned long         mNumChannels;
@@ -178,7 +179,7 @@ private:
    bool                  mStreamInfoDone;
    int                   mUpdateResult;
    TrackHolders          mChannels;
-   ODDecodeFlacTask     *mDecoderTask;
+   movable_ptr<ODDecodeFlacTask> mDecoderTask;
 };
 
 
@@ -218,6 +219,9 @@ void MyFLACFile::metadata_callback(const FLAC__StreamMetadata *metadata)
       case FLAC__METADATA_TYPE_CUESHEET:	// convert this to labels?
       case FLAC__METADATA_TYPE_PICTURE:		// ignore pictures
       case FLAC__METADATA_TYPE_UNDEFINED:	// do nothing with this either
+
+      case FLAC__MAX_METADATA_TYPE: // quiet compiler warning with this line
+
       break;
    }
 }
@@ -281,10 +285,10 @@ FLAC__StreamDecoderWriteStatus MyFLACFile::write_callback(const FLAC__Frame *fra
 }
 
 
-void GetFLACImportPlugin(ImportPluginList *importPluginList,
-                         UnusableImportPluginList *WXUNUSED(unusableImportPluginList))
+void GetFLACImportPlugin(ImportPluginList &importPluginList,
+                         UnusableImportPluginList &WXUNUSED(unusableImportPluginList))
 {
-   importPluginList->Append(new FLACImportPlugin);
+   importPluginList.push_back( make_movable<FLACImportPlugin>() );
 }
 
 
@@ -304,6 +308,8 @@ std::unique_ptr<ImportFileHandle> FLACImportPlugin::Open(const wxString &filenam
       return nullptr; // File not found
    }
 
+   // FIXME: TRAP_ERR wxFILE ops in FLAC Import could fail.
+   // Seek() return value is not examined, for example.
 #ifdef USE_LIBID3TAG
    // Skip any ID3 tags that might be present
    id3_byte_t query[ID3_TAG_QUERYSIZE];
@@ -329,6 +335,7 @@ std::unique_ptr<ImportFileHandle> FLACImportPlugin::Open(const wxString &filenam
       return nullptr;
    }
 
+   // This std::move is needed to "upcast" the pointer type
    return std::move(handle);
 }
 
@@ -341,19 +348,17 @@ FLACImportFileHandle::FLACImportFileHandle(const wxString & name)
 {
    mFormat = (sampleFormat)
       gPrefs->Read(wxT("/SamplingRate/DefaultProjectSampleFormat"), floatSample);
-   mFile = new MyFLACFile(this);
+   mFile = std::make_unique<MyFLACFile>(this);
 }
 
 bool FLACImportFileHandle::Init()
 {
 #ifdef EXPERIMENTAL_OD_FLAC
-   mDecoderTask=new ODDecodeFlacTask;
+   mDecoderTask = make_movable<ODDecodeFlacTask>();
 
    ODFlacDecoder* odDecoder = (ODFlacDecoder*)mDecoderTask->CreateFileDecoder(mFilename);
    if(!odDecoder || !odDecoder->ReadHeader())
    {
-      //DELETE the task only if it failed to read - otherwise the OD man takes care of it.
-      delete mDecoderTask;
       return false;
    }
    //copy the meta data over to the class
@@ -426,7 +431,7 @@ wxString FLACImportFileHandle::GetFileDescription()
 }
 
 
-int FLACImportFileHandle::GetFileUncompressedBytes()
+auto FLACImportFileHandle::GetFileUncompressedBytes() -> ByteCount
 {
    // TODO: Get Uncompressed byte count.
    return 0;
@@ -486,18 +491,21 @@ int FLACImportFileHandle::Import(TrackFactory *trackFactory,
    //add the task to the ODManager
    if(useOD)
    {
-      sampleCount fileTotalFrames = mNumSamples;
-      sampleCount maxBlockSize = mChannels.begin()->get()->GetMaxBlockSize();
-      for (sampleCount i = 0; i < fileTotalFrames; i += maxBlockSize) {
-         sampleCount blockLen = maxBlockSize;
-         if (i + blockLen > fileTotalFrames)
-            blockLen = fileTotalFrames - i;
+      auto fileTotalFrames =
+         (sampleCount)mNumSamples; // convert from FLAC__uint64
+      auto maxBlockSize = mChannels.begin()->get()->GetMaxBlockSize();
+      for (decltype(fileTotalFrames) i = 0; i < fileTotalFrames; i += maxBlockSize) {
+         const auto blockLen =
+            limitSampleBufferSize( maxBlockSize, fileTotalFrames - i );
 
          auto iter = mChannels.begin();
          for (int c = 0; c < mNumChannels; ++c, ++iter)
             iter->get()->AppendCoded(mFilename, i, blockLen, c, ODTask::eODFLAC);
 
-         mUpdateResult = mProgress->Update(i, fileTotalFrames);
+         mUpdateResult = mProgress->Update(
+            i.as_long_long(),
+            fileTotalFrames.as_long_long()
+         );
          if (mUpdateResult != eProgressSuccess)
             break;
       }
@@ -509,13 +517,13 @@ int FLACImportFileHandle::Import(TrackFactory *trackFactory,
          if(moreThanStereo)
          {
             //if we have 3 more channels, they get imported on seperate tracks, so we add individual tasks for each.
-            ODManager::Instance()->AddNewTask(mDecoderTask);
-            mDecoderTask = new ODDecodeFlacTask; //TODO: see if we need to use clone to keep the metadata.
+            ODManager::Instance()->AddNewTask(std::move(mDecoderTask));
+            mDecoderTask = make_movable<ODDecodeFlacTask>(); //TODO: see if we need to use clone to keep the metadata.
          }
       }
       //if we have mono or a linked track (stereo), we add ONE task for the one linked wave track
       if(!moreThanStereo)
-         ODManager::Instance()->AddNewTask(mDecoderTask);
+         ODManager::Instance()->AddNewTask(std::move(mDecoderTask));
    }
 //END OD
 
@@ -552,7 +560,6 @@ FLACImportFileHandle::~FLACImportFileHandle()
    //don't DELETE mFile if we are using OD.
 #ifndef EXPERIMENTAL_OD_FLAC
    mFile->finish();
-   delete mFile;
 #endif
 }
 

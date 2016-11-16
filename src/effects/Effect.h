@@ -25,7 +25,6 @@
 
 class wxCheckBox;
 class wxChoice;
-class wxDialog;
 class wxListBox;
 class wxWindow;
 
@@ -98,33 +97,33 @@ class AUDACITY_DLL_API Effect /* not final */ : public wxEvtHandler,
 
    bool SetHost(EffectHostInterface *host) override;
    
-   int GetAudioInCount() override;
-   int GetAudioOutCount() override;
+   unsigned GetAudioInCount() override;
+   unsigned GetAudioOutCount() override;
 
    int GetMidiInCount() override;
    int GetMidiOutCount() override;
 
    sampleCount GetLatency() override;
-   sampleCount GetTailSize() override;
+   size_t GetTailSize() override;
 
-   void SetSampleRate(sampleCount rate) override;
-   sampleCount SetBlockSize(sampleCount maxBlockSize) override;
+   void SetSampleRate(double rate) override;
+   size_t SetBlockSize(size_t maxBlockSize) override;
 
    bool IsReady() override;
    bool ProcessInitialize(sampleCount totalLen, ChannelNames chanMap = NULL) override;
    bool ProcessFinalize() override;
-   sampleCount ProcessBlock(float **inBlock, float **outBlock, sampleCount blockLen) override;
+   size_t ProcessBlock(float **inBlock, float **outBlock, size_t blockLen) override;
 
    bool RealtimeInitialize() override;
-   bool RealtimeAddProcessor(int numChannels, float sampleRate) override;
+   bool RealtimeAddProcessor(unsigned numChannels, float sampleRate) override;
    bool RealtimeFinalize() override;
    bool RealtimeSuspend() override;
    bool RealtimeResume() override;
    bool RealtimeProcessStart() override;
-   sampleCount RealtimeProcess(int group,
+   size_t RealtimeProcess(int group,
                                        float **inbuf,
                                        float **outbuf,
-                                       sampleCount numSamples) override;
+                                       size_t numSamples) override;
    bool RealtimeProcessEnd() override;
 
    bool ShowInterface(wxWindow *parent, bool forceModal = false) override;
@@ -183,14 +182,12 @@ class AUDACITY_DLL_API Effect /* not final */ : public wxEvtHandler,
    bool GetSharedConfig(const wxString & group, const wxString & key, bool & value, bool defval = false) override;
    bool GetSharedConfig(const wxString & group, const wxString & key, float & value, float defval = 0.0) override;
    bool GetSharedConfig(const wxString & group, const wxString & key, double & value, double defval = 0.0) override;
-   bool GetSharedConfig(const wxString & group, const wxString & key, sampleCount & value, sampleCount defval = 0) override;
 
    bool SetSharedConfig(const wxString & group, const wxString & key, const wxString & value) override;
    bool SetSharedConfig(const wxString & group, const wxString & key, const int & value) override;
    bool SetSharedConfig(const wxString & group, const wxString & key, const bool & value) override;
    bool SetSharedConfig(const wxString & group, const wxString & key, const float & value) override;
    bool SetSharedConfig(const wxString & group, const wxString & key, const double & value) override;
-   bool SetSharedConfig(const wxString & group, const wxString & key, const sampleCount & value) override;
 
    bool RemoveSharedConfigSubgroup(const wxString & group) override;
    bool RemoveSharedConfig(const wxString & group, const wxString & key) override;
@@ -203,14 +200,12 @@ class AUDACITY_DLL_API Effect /* not final */ : public wxEvtHandler,
    bool GetPrivateConfig(const wxString & group, const wxString & key, bool & value, bool defval = false) override;
    bool GetPrivateConfig(const wxString & group, const wxString & key, float & value, float defval = 0.0) override;
    bool GetPrivateConfig(const wxString & group, const wxString & key, double & value, double defval = 0.0) override;
-   bool GetPrivateConfig(const wxString & group, const wxString & key, sampleCount & value, sampleCount defval = 0) override;
 
    bool SetPrivateConfig(const wxString & group, const wxString & key, const wxString & value) override;
    bool SetPrivateConfig(const wxString & group, const wxString & key, const int & value) override;
    bool SetPrivateConfig(const wxString & group, const wxString & key, const bool & value) override;
    bool SetPrivateConfig(const wxString & group, const wxString & key, const float & value) override;
    bool SetPrivateConfig(const wxString & group, const wxString & key, const double & value) override;
-   bool SetPrivateConfig(const wxString & group, const wxString & key, const sampleCount & value) override;
 
    bool RemovePrivateConfigSubgroup(const wxString & group) override;
    bool RemovePrivateConfig(const wxString & group, const wxString & key) override;
@@ -247,12 +242,12 @@ class AUDACITY_DLL_API Effect /* not final */ : public wxEvtHandler,
                  bool shouldPrompt = true);
 
    // Realtime Effect Processing
-   /* not virtual */ bool RealtimeAddProcessor(int group, int chans, float rate);
-   /* not virtual */ sampleCount RealtimeProcess(int group,
-                               int chans,
+   /* not virtual */ bool RealtimeAddProcessor(int group, unsigned chans, float rate);
+   /* not virtual */ size_t RealtimeProcess(int group,
+                               unsigned chans,
                                float **inbuf,
                                float **outbuf,
-                               sampleCount numSamples);
+                               size_t numSamples);
    /* not virtual */ bool IsRealtimeActive();
 
    virtual bool IsHidden();
@@ -331,7 +326,7 @@ protected:
    // Calculates the start time and selection length in samples
    void GetSamples(WaveTrack *track, sampleCount *start, sampleCount *len);
 
-   void SetTimeWarper(TimeWarper *warper);
+   void SetTimeWarper(std::unique_ptr<TimeWarper> &&warper);
    TimeWarper *GetTimeWarper();
 
    // Previewing linear effect can be optimised by pre-mixing. However this
@@ -440,14 +435,14 @@ protected:
    double         mSampleRate;
    TrackFactory   *mFactory;
    TrackList      *mTracks;      // the complete list of all tracks
-   TrackList      *mOutputTracks; // used only if CopyInputTracks() is called.
+   std::unique_ptr<TrackList> mOutputTracks; // used only if CopyInputTracks() is called.
    double         mT0;
    double         mT1;
 #ifdef EXPERIMENTAL_SPECTRAL_EDITING
    double         mF0;
    double         mF1;
 #endif
-   TimeWarper     *mWarper;
+   std::unique_ptr<TimeWarper> mWarper;
    wxArrayString  mPresetNames;
    wxArrayString  mPresetValues;
    int            mPass;
@@ -499,25 +494,25 @@ private:
 
    bool mUIDebug;
 
-   wxArrayPtrVoid mIMap;
-   wxArrayPtrVoid mOMap;
+   std::vector<Track*> mIMap;
+   std::vector<Track*> mOMap;
 
    int mNumTracks; //v This is really mNumWaveTracks, per CountWaveTracks() and GetNumWaveTracks().
    int mNumGroups;
 
    // For client driver
    EffectClientInterface *mClient;
-   int mNumAudioIn;
-   int mNumAudioOut;
+   unsigned mNumAudioIn;
+   unsigned mNumAudioOut;
 
    float **mInBuffer;
    float **mOutBuffer;
    float **mInBufPos;
    float **mOutBufPos;
 
-   sampleCount mBufferSize;
-   sampleCount mBlockSize;
-   int mNumChannels;
+   size_t mBufferSize;
+   size_t mBlockSize;
+   unsigned mNumChannels;
 
    wxArrayInt mGroupProcessor;
    int mCurrentProcessor;
@@ -544,7 +539,7 @@ private:
 #define ID_EFFECT_PREVIEW ePreviewID
 
 // Base dialog for regular effect
-class AUDACITY_DLL_API EffectDialog /* not final */ : public wxDialog
+class AUDACITY_DLL_API EffectDialog /* not final */ : public wxDialogWrapper
 {
 public:
    // constructors and destructors
@@ -569,11 +564,11 @@ private:
    int mType;
    int mAdditionalButtons;
 
-   DECLARE_EVENT_TABLE();
+   DECLARE_EVENT_TABLE()
 };
 
 //
-class EffectUIHost final : public wxDialog,
+class EffectUIHost final : public wxDialogWrapper,
                      public EffectUIHostInterface
 {
 public:
@@ -661,10 +656,10 @@ private:
 
    bool mDismissed{};
 
-   DECLARE_EVENT_TABLE();
+   DECLARE_EVENT_TABLE()
 };
 
-class EffectPresetsDialog final : public wxDialog
+class EffectPresetsDialog final : public wxDialogWrapper
 {
 public:
    EffectPresetsDialog(wxWindow *parent, Effect *effect);
@@ -689,7 +684,7 @@ private:
    wxArrayString mUserPresets;
    wxString mSelection;
 
-   DECLARE_EVENT_TABLE();
+   DECLARE_EVENT_TABLE()
 };
 
 // Utility functions

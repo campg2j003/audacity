@@ -170,7 +170,11 @@ void ScreenshotCommand::Capture(const wxString &filename,
 
    int screenW, screenH;
    wxDisplaySize(&screenW, &screenH);
-   wxBitmap full(screenW, screenH);
+   // Bug 1378 workaround.
+   // wx 3.0.2 has a bug in Blit from ScreenDC where in default mode 
+   // much is drawn transparent - including for example black text!
+   // Forcing 24 bit here is a workaround.
+   wxBitmap full(screenW, screenH, 24);
 
    wxScreenDC screenDC;
    wxMemoryDC fullDC;
@@ -270,7 +274,7 @@ wxString ScreenshotCommandType::BuildName()
 
 void ScreenshotCommandType::BuildSignature(CommandSignature &signature)
 {
-   OptionValidator *captureModeValidator = new OptionValidator();
+   auto captureModeValidator = make_movable<OptionValidator>();
    captureModeValidator->AddOption(wxT("window"));
    captureModeValidator->AddOption(wxT("fullwindow"));
    captureModeValidator->AddOption(wxT("windowplus"));
@@ -290,20 +294,20 @@ void ScreenshotCommandType::BuildSignature(CommandSignature &signature)
    captureModeValidator->AddOption(wxT("firsttrack"));
    captureModeValidator->AddOption(wxT("secondtrack"));
 
-   OptionValidator *backgroundValidator = new OptionValidator();
+   auto backgroundValidator = make_movable<OptionValidator>();
    backgroundValidator->AddOption(wxT("Blue"));
    backgroundValidator->AddOption(wxT("White"));
    backgroundValidator->AddOption(wxT("None"));
 
-   Validator *filePathValidator = new DefaultValidator();
+   auto filePathValidator = make_movable<DefaultValidator>();
 
    signature.AddParameter(wxT("CaptureMode"),
                           wxT("fullscreen"),
-                          captureModeValidator);
+                          std::move(captureModeValidator));
    signature.AddParameter(wxT("Background"),
                           wxT("None"),
-                          backgroundValidator);
-   signature.AddParameter(wxT("FilePath"), wxT(""), filePathValidator);
+                          std::move(backgroundValidator));
+   signature.AddParameter(wxT("FilePath"), wxT(""), std::move(filePathValidator));
 }
 
 CommandHolder ScreenshotCommandType::Create(std::unique_ptr<CommandOutputTarget> &&target)
@@ -451,6 +455,10 @@ bool ScreenshotCommand::Apply(CommandExecutionContext context)
    else if (captureMode.IsSameAs(wxT("transcription")))
    {
       CaptureToolbar(context.GetProject()->GetToolManager(), TranscriptionBarID, fileName);
+   }
+   else if (captureMode.IsSameAs(wxT("scrubbing")))
+   {
+      CaptureToolbar(context.GetProject()->GetToolManager(), ScrubbingBarID, fileName);
    }
    else if (captureMode.IsSameAs(wxT("trackpanel")))
    {

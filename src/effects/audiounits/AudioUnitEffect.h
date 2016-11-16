@@ -14,6 +14,8 @@
 
 #if USE_AUDIO_UNITS
 
+#include "../../MemoryX.h"
+#include <vector>
 #include <wx/dialog.h>
 
 #include <AudioToolbox/AudioUnitUtilities.h>
@@ -31,7 +33,7 @@
 
 class AudioUnitEffect;
 
-WX_DEFINE_ARRAY_PTR(AudioUnitEffect *, AudioUnitEffectArray);
+using AudioUnitEffectArray = std::vector<movable_ptr<AudioUnitEffect>>;
 
 class AudioUnitEffectExportDialog;
 class AudioUnitEffectImportDialog;
@@ -70,33 +72,33 @@ public:
 
    bool SetHost(EffectHostInterface *host) override;
 
-   int GetAudioInCount() override;
-   int GetAudioOutCount() override;
+   unsigned GetAudioInCount() override;
+   unsigned GetAudioOutCount() override;
 
    int GetMidiInCount() override;
    int GetMidiOutCount() override;
 
-   void SetSampleRate(sampleCount rate) override;
-   sampleCount SetBlockSize(sampleCount maxBlockSize) override;
+   void SetSampleRate(double rate) override;
+   size_t SetBlockSize(size_t maxBlockSize) override;
 
    sampleCount GetLatency() override;
-   sampleCount GetTailSize() override;
+   size_t GetTailSize() override;
 
    bool IsReady() override;
    bool ProcessInitialize(sampleCount totalLen, ChannelNames chanMap = NULL) override;
    bool ProcessFinalize() override;
-   sampleCount ProcessBlock(float **inBlock, float **outBlock, sampleCount blockLen) override;
+   size_t ProcessBlock(float **inBlock, float **outBlock, size_t blockLen) override;
 
    bool RealtimeInitialize() override;
-   bool RealtimeAddProcessor(int numChannels, float sampleRate) override;
+   bool RealtimeAddProcessor(unsigned numChannels, float sampleRate) override;
    bool RealtimeFinalize() override;
    bool RealtimeSuspend() override;
    bool RealtimeResume() override;
    bool RealtimeProcessStart() override;
-   sampleCount RealtimeProcess(int group,
+   size_t RealtimeProcess(int group,
                                        float **inbuf,
                                        float **outbuf,
-                                       sampleCount numSamples) override;
+                                       size_t numSamples) override;
    bool RealtimeProcessEnd() override;
 
    bool ShowInterface(wxWindow *parent, bool forceModal = false) override;
@@ -135,8 +137,8 @@ private:
    bool CopyParameters(AudioUnit srcUnit, AudioUnit dstUnit);
 
    // Realtime
-   int GetChannelCount();
-   void SetChannelCount(int numChannels);
+   unsigned GetChannelCount();
+   void SetChannelCount(unsigned numChannels);
    
    static OSStatus RenderCallback(void *inRefCon,
                                   AudioUnitRenderActionFlags *inActionFlags,
@@ -179,7 +181,7 @@ private:
    bool mSupportsStereo;
 
    EffectHostInterface *mHost;
-   int mAudioIns;
+   unsigned mAudioIns;
    int mAudioOuts;
    bool mInteractive;
    bool mLatencyDone;
@@ -198,16 +200,15 @@ private:
    EffectUIHostInterface *mUIHost;
    wxWindow *mParent;
    wxDialog *mDialog;
-   AUControl *mControl;
    wxString mUIType;
    bool mIsGraphical;
 
    AudioUnitEffect *mMaster;     // non-NULL if a slave
    AudioUnitEffectArray mSlaves;
-   int mNumChannels;
+   unsigned mNumChannels;
    float **mMasterIn;
    float **mMasterOut;
-   sampleCount mNumSamples;
+   size_t mNumSamples;
    
    AUEventListenerRef mEventListenerRef;
 

@@ -121,12 +121,12 @@ bool EffectWahwah::SupportsRealtime()
 
 // EffectClientInterface implementation
 
-int EffectWahwah::GetAudioInCount()
+unsigned EffectWahwah::GetAudioInCount()
 {
    return 1;
 }
 
-int EffectWahwah::GetAudioOutCount()
+unsigned EffectWahwah::GetAudioOutCount()
 {
    return 1;
 }
@@ -143,7 +143,7 @@ bool EffectWahwah::ProcessInitialize(sampleCount WXUNUSED(totalLen), ChannelName
    return true;
 }
 
-sampleCount EffectWahwah::ProcessBlock(float **inBlock, float **outBlock, sampleCount blockLen)
+size_t EffectWahwah::ProcessBlock(float **inBlock, float **outBlock, size_t blockLen)
 {
    return InstanceProcess(mMaster, inBlock, outBlock, blockLen);
 }
@@ -157,7 +157,7 @@ bool EffectWahwah::RealtimeInitialize()
    return true;
 }
 
-bool EffectWahwah::RealtimeAddProcessor(int WXUNUSED(numChannels), float sampleRate)
+bool EffectWahwah::RealtimeAddProcessor(unsigned WXUNUSED(numChannels), float sampleRate)
 {
    EffectWahwahState slave;
 
@@ -175,10 +175,10 @@ bool EffectWahwah::RealtimeFinalize()
    return true;
 }
 
-sampleCount EffectWahwah::RealtimeProcess(int group,
+size_t EffectWahwah::RealtimeProcess(int group,
                                           float **inbuf,
                                           float **outbuf,
-                                          sampleCount numSamples)
+                                          size_t numSamples)
 {
 
    return InstanceProcess(mSlaves[group], inbuf, outbuf, numSamples);
@@ -228,7 +228,7 @@ void EffectWahwah::PopulateOrExchange(ShuttleGui & S)
 
       FloatingPointValidator<double> vldfreq(5, &mFreq, NUM_VAL_ONE_TRAILING_ZERO);
       vldfreq.SetRange(MIN_Freq, MAX_Freq);
-      mFreqT = S.Id(ID_Freq).AddTextBox(_("LFO Frequency (Hz):"), wxT(""), 12);
+      mFreqT = S.Id(ID_Freq).AddTextBox(_("LFO Freq&uency (Hz):"), wxT(""), 12);
       mFreqT->SetValidator(vldfreq);
 
       S.SetStyle(wxSL_HORIZONTAL);
@@ -238,7 +238,7 @@ void EffectWahwah::PopulateOrExchange(ShuttleGui & S)
 
       FloatingPointValidator<double> vldphase(1, &mPhase);
       vldphase.SetRange(MIN_Phase, MAX_Phase);
-      mPhaseT = S.Id(ID_Phase).AddTextBox(_("LFO Start Phase (deg.):"), wxT(""), 12);
+      mPhaseT = S.Id(ID_Phase).AddTextBox(_("LFO Sta&rt Phase (deg.):"), wxT(""), 12);
       mPhaseT->SetValidator(vldphase);
 
       S.SetStyle(wxSL_HORIZONTAL);
@@ -249,7 +249,7 @@ void EffectWahwah::PopulateOrExchange(ShuttleGui & S)
 
       IntegerValidator<int> vlddepth(&mDepth);
       vlddepth.SetRange(MIN_Depth, MAX_Depth);
-      mDepthT = S.Id(ID_Depth).AddTextBox(_("Depth (%):"), wxT(""), 12);
+      mDepthT = S.Id(ID_Depth).AddTextBox(_("Dept&h (%):"), wxT(""), 12);
       mDepthT->SetValidator(vlddepth);
 
       S.SetStyle(wxSL_HORIZONTAL);
@@ -259,7 +259,7 @@ void EffectWahwah::PopulateOrExchange(ShuttleGui & S)
 
       FloatingPointValidator<double> vldres(1, &mRes);
       vldres.SetRange(MIN_Res, MAX_Res);
-      mResT = S.Id(ID_Res).AddTextBox(_("Resonance:"), wxT(""), 12);
+      mResT = S.Id(ID_Res).AddTextBox(_("Reso&nance:"), wxT(""), 12);
       mResT->SetValidator(vldres);
 
       S.SetStyle(wxSL_HORIZONTAL);
@@ -269,7 +269,7 @@ void EffectWahwah::PopulateOrExchange(ShuttleGui & S)
 
       IntegerValidator<int> vldfreqoffset(&mFreqOfs);
       vldfreqoffset.SetRange(MIN_FreqOfs, MAX_FreqOfs);
-      mFreqOfsT = S.Id(ID_FreqOfs).AddTextBox(_("Wah Frequency Offset (%):"), wxT(""), 12);
+      mFreqOfsT = S.Id(ID_FreqOfs).AddTextBox(_("Wah Frequency Offse&t (%):"), wxT(""), 12);
       mFreqOfsT->SetValidator(vldfreqoffset);
 
       S.SetStyle(wxSL_HORIZONTAL);
@@ -279,7 +279,7 @@ void EffectWahwah::PopulateOrExchange(ShuttleGui & S)
 
       FloatingPointValidator<double> vldoutgain(1, &mOutGain);
       vldoutgain.SetRange(MIN_OutGain, MAX_OutGain);
-      mOutGainT = S.Id(ID_OutGain).AddTextBox(_("Output gain (dB):"), wxT(""), 12);
+      mOutGainT = S.Id(ID_OutGain).AddTextBox(_("&Output gain (dB):"), wxT(""), 12);
       mOutGainT->SetValidator(vldoutgain);
 
       S.SetStyle(wxSL_HORIZONTAL);
@@ -341,7 +341,7 @@ void EffectWahwah::InstanceInit(EffectWahwahState & data, float sampleRate)
    data.outgain = DB_TO_LINEAR(mOutGain);
 }
 
-sampleCount EffectWahwah::InstanceProcess(EffectWahwahState & data, float **inBlock, float **outBlock, sampleCount blockLen)
+size_t EffectWahwah::InstanceProcess(EffectWahwahState & data, float **inBlock, float **outBlock, size_t blockLen)
 {
    float *ibuf = inBlock[0];
    float *obuf = outBlock[0];
@@ -355,7 +355,7 @@ sampleCount EffectWahwah::InstanceProcess(EffectWahwahState & data, float **inBl
    data.phase = mPhase * M_PI / 180.0;
    data.outgain = DB_TO_LINEAR(mOutGain);
 
-   for (int i = 0; i < blockLen; i++)
+   for (decltype(blockLen) i = 0; i < blockLen; i++)
    {
       in = (double) ibuf[i];
 

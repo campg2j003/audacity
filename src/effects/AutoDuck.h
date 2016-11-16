@@ -14,12 +14,12 @@
 #include <wx/bitmap.h>
 #include <wx/event.h>
 #include <wx/gdicmn.h>
-#include <wx/panel.h>
 #include <wx/string.h>
 #include <wx/textctrl.h>
 #include <wx/window.h>
 
 #include "Effect.h"
+#include "../widgets/wxPanelWrapper.h"
 
 class EffectAutoDuckPanel;
 class ShuttleGui;
@@ -74,7 +74,7 @@ private:
    double mThresholdDb;
    double mMaximumPause;
 
-   WaveTrack *mControlTrack;
+   const WaveTrack *mControlTrack;
 
    wxTextCtrl *mDuckAmountDbBox;
    wxTextCtrl *mInnerFadeDownLenBox;
@@ -85,12 +85,12 @@ private:
    wxTextCtrl *mMaximumPauseBox;
    EffectAutoDuckPanel *mPanel;
 
-   DECLARE_EVENT_TABLE();
+   DECLARE_EVENT_TABLE()
 
    friend class EffectAutoDuckPanel;
 };
 
-class EffectAutoDuckPanel final : public wxPanel
+class EffectAutoDuckPanel final : public wxPanelWrapper
 {
 public:
    EffectAutoDuckPanel(wxWindow *parent, EffectAutoDuck *effect);
@@ -125,14 +125,14 @@ private:
 private:
    wxWindow *mParent;
    EffectAutoDuck *mEffect;
-   wxBitmap *mBackgroundBitmap;
+   std::unique_ptr<wxBitmap> mBackgroundBitmap;
    EControlPoint mCurrentControlPoint;
    wxPoint mControlPoints[AUTO_DUCK_PANEL_NUM_CONTROL_POINTS];
    wxPoint mMoveStartControlPoints[AUTO_DUCK_PANEL_NUM_CONTROL_POINTS];
    wxPoint mMouseDownPoint;
    bool mControlPointMoveActivated;
 
-   DECLARE_EVENT_TABLE();
+   DECLARE_EVENT_TABLE()
 };
 
 #endif

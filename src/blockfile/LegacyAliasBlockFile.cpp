@@ -23,12 +23,12 @@
 LegacyAliasBlockFile::LegacyAliasBlockFile(wxFileNameWrapper &&fileName,
                                            wxFileNameWrapper &&aliasedFileName,
                                            sampleCount aliasStart,
-                                           sampleCount aliasLen,
+                                           size_t aliasLen,
                                            int aliasChannel,
-                                           sampleCount summaryLen,
+                                           size_t summaryLen,
                                            bool noRMS)
-: PCMAliasBlockFile(std::move(fileName), std::move(aliasedFileName), aliasStart, aliasLen,
-                    aliasChannel, 0.0, 0.0, 0.0)
+: PCMAliasBlockFile{ std::move(fileName), std::move(aliasedFileName), aliasStart, aliasLen,
+                     aliasChannel, 0.0, 0.0, 0.0 }
 {
    sampleFormat format;
 
@@ -51,14 +51,12 @@ LegacyAliasBlockFile::~LegacyAliasBlockFile()
 /// the summary data to a NEW file.
 ///
 /// @param newFileName The filename to copy the summary data to.
-BlockFile *LegacyAliasBlockFile::Copy(wxFileNameWrapper &&newFileName)
+BlockFilePtr LegacyAliasBlockFile::Copy(wxFileNameWrapper &&newFileName)
 {
-   BlockFile *newBlockFile =
-      new LegacyAliasBlockFile(std::move(newFileName),
-                               wxFileNameWrapper{mAliasedFileName}, mAliasStart,
-                               mLen, mAliasChannel,
-                               mSummaryInfo.totalSummaryBytes,
-                               mSummaryInfo.fields < 3);
+   auto newBlockFile = make_blockfile<LegacyAliasBlockFile>
+      (std::move(newFileName), wxFileNameWrapper{ mAliasedFileName },
+       mAliasStart, mLen, mAliasChannel,
+       mSummaryInfo.totalSummaryBytes, mSummaryInfo.fields < 3);
 
    return newBlockFile;
 }
@@ -70,7 +68,8 @@ void LegacyAliasBlockFile::SaveXML(XMLWriter &xmlFile)
    xmlFile.WriteAttr(wxT("alias"), 1);
    xmlFile.WriteAttr(wxT("name"), mFileName.GetFullName());
    xmlFile.WriteAttr(wxT("aliaspath"), mAliasedFileName.GetFullPath());
-   xmlFile.WriteAttr(wxT("aliasstart"), mAliasStart);
+   xmlFile.WriteAttr(wxT("aliasstart"),
+                     mAliasStart.as_long_long() );
    xmlFile.WriteAttr(wxT("aliaslen"), mLen);
    xmlFile.WriteAttr(wxT("aliaschannel"), mAliasChannel);
    xmlFile.WriteAttr(wxT("summarylen"), mSummaryInfo.totalSummaryBytes);
@@ -83,7 +82,7 @@ void LegacyAliasBlockFile::SaveXML(XMLWriter &xmlFile)
 // BuildFromXML methods should always return a BlockFile, not NULL,
 // even if the result is flawed (e.g., refers to nonexistent file),
 // as testing will be done in DirManager::ProjectFSCK().
-BlockFile *LegacyAliasBlockFile::BuildFromXML(const wxString &projDir, const wxChar **attrs)
+BlockFilePtr LegacyAliasBlockFile::BuildFromXML(const wxString &projDir, const wxChar **attrs)
 {
    wxFileNameWrapper summaryFileName;
    wxFileNameWrapper aliasFileName;
@@ -91,6 +90,7 @@ BlockFile *LegacyAliasBlockFile::BuildFromXML(const wxString &projDir, const wxC
    int summaryLen=0;
    bool noRMS = false;
    long nValue;
+   long long nnValue;
 
    while(*attrs)
    {
@@ -118,11 +118,15 @@ BlockFile *LegacyAliasBlockFile::BuildFromXML(const wxString &projDir, const wxC
             // but we want to keep the reference to the missing file because it's a good path string.
             aliasFileName.Assign(strValue);
       }
+      else if ( !wxStricmp(attr, wxT("aliasstart")) )
+      {
+         if (XMLValueChecker::IsGoodInt64(strValue) &&
+             strValue.ToLongLong(&nnValue) && (nnValue >= 0))
+            aliasStart = nnValue;
+      }
       else if (XMLValueChecker::IsGoodInt(strValue) && strValue.ToLong(&nValue))
       {  // integer parameters
-         if (!wxStricmp(attr, wxT("aliasstart")) && (nValue >= 0))
-            aliasStart = nValue;
-         else if (!wxStricmp(attr, wxT("aliaslen")) && (nValue >= 0))
+         if (!wxStricmp(attr, wxT("aliaslen")) && (nValue >= 0))
             aliasLen = nValue;
          else if (!wxStricmp(attr, wxT("aliaschannel")) && XMLValueChecker::IsValidChannel(aliasChannel))
             aliasChannel = nValue;
@@ -133,9 +137,9 @@ BlockFile *LegacyAliasBlockFile::BuildFromXML(const wxString &projDir, const wxC
       }
    }
 
-   return new LegacyAliasBlockFile(std::move(summaryFileName), std::move(aliasFileName),
-                                   aliasStart, aliasLen, aliasChannel,
-                                   summaryLen, noRMS);
+   return make_blockfile<LegacyAliasBlockFile>
+      (std::move(summaryFileName), std::move(aliasFileName),
+       aliasStart, aliasLen, aliasChannel, summaryLen, noRMS);
 }
 
 // regenerates the summary info, doesn't deal with missing alias files

@@ -17,7 +17,6 @@
 
 #include <vector>
 #include <wx/defs.h>
-#include <wx/dynarray.h>
 #include <wx/string.h>
 #include "widgets/NumericTextCtrl.h"
 
@@ -26,25 +25,30 @@ class Track;
 class TrackArray;
 class TrackClipArray;
 class WaveClip;
+class WaveTrack;
 class TrackList;
 class ZoomInfo;
 
 class TrackClip
 {
 public:
-   TrackClip(Track *t, WaveClip *c)
-   {
-      track = origTrack = t;
-      dstTrack = NULL;
-      clip = c;
-   }
+   TrackClip(Track *t, WaveClip *c);
+
+#ifndef __AUDACITY_OLD_STD__
+   // TrackClip(TrackClip&&) = default; is not supported by vs2013/5 so explicit version needed
+   TrackClip(TrackClip&&);
+#endif
+
+   ~TrackClip();
+
    Track *track;
    Track *origTrack;
-   Track *dstTrack;
+   WaveTrack *dstTrack;
    WaveClip *clip;
+   movable_ptr<WaveClip> holder;
 };
 
-WX_DECLARE_USER_EXPORTED_OBJARRAY(TrackClip, TrackClipArray, AUDACITY_DLL_API);
+class TrackClipArray : public std::vector < TrackClip > {};
 
 enum
 {
@@ -59,13 +63,13 @@ class SnapPoint
 {
 public:
    explicit
-   SnapPoint(double t_ = 0.0, Track *track_ = nullptr)
+   SnapPoint(double t_ = 0.0, const Track *track_ = nullptr)
       : t(t_), track(track_)
    {
    }
 
    double t;
-   Track *track;
+   const Track *track;
 };
 
 using SnapPointArray = std::vector < SnapPoint > ;
@@ -100,7 +104,7 @@ public:
 private:
 
    void Reinit();
-   void CondListAdd(double t, Track *track);
+   void CondListAdd(double t, const Track *track);
    double Get(size_t index);
    wxInt64 PixelDiff(double t, size_t index);
    size_t Find(double t, size_t i0, size_t i1);

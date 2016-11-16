@@ -17,13 +17,13 @@
 #include <wx/bmpbuttn.h>
 #include <wx/hashmap.h>
 #include <wx/image.h>
-#include <wx/panel.h>
 #include <wx/scrolwin.h>
 #include <wx/statbmp.h>
 #include <wx/stattext.h>
 
 #include "widgets/AButton.h"
 #include "widgets/ASlider.h"
+#include "widgets/wxPanelWrapper.h"
 
 // containment hierarchy:
 //    MixerBoardFrame -> MixerBoard -> MixerBoardScrolledWindow -> MixerTrackCluster(s)
@@ -68,7 +68,7 @@ class NoteTrack;
 #endif
 class WaveTrack;
 
-class MixerTrackCluster final : public wxPanel
+class MixerTrackCluster final : public wxPanelWrapper
 {
 public:
    MixerTrackCluster(wxWindow* parent,
@@ -100,7 +100,7 @@ private:
    wxColour GetTrackColor();
 
    // event handlers
-   void HandleSelect(const bool bShiftDown);
+   void HandleSelect(bool bShiftDown, bool bControlDown);
 
    void OnKeyEvent(wxKeyEvent& event);
    void OnMouseEvent(wxMouseEvent& event);
@@ -156,13 +156,14 @@ WX_DEFINE_ARRAY(MixerTrackCluster*, MixerTrackClusterArray);
 class MusicalInstrument
 {
 public:
-   MusicalInstrument(wxBitmap* pBitmap, const wxString & strXPMfilename);
+   MusicalInstrument(std::unique_ptr<wxBitmap> &&pBitmap, const wxString & strXPMfilename);
    virtual ~MusicalInstrument();
 
-   wxBitmap*      mBitmap;
+   std::unique_ptr<wxBitmap> mBitmap;
    wxArrayString  mKeywords;
 };
-WX_DECLARE_OBJARRAY(MusicalInstrument, MusicalInstrumentArray);
+
+using MusicalInstrumentArray = std::vector<movable_ptr<MusicalInstrument>>;
 
 
 
@@ -274,15 +275,9 @@ private:
 
 public:
    // mute & solo button images: Create once and store on MixerBoard for use in all MixerTrackClusters.
-   wxImage* mImageMuteUp;
-   wxImage* mImageMuteOver;
-   wxImage* mImageMuteDown;
-   wxImage* mImageMuteDownWhileSolo; // the one actually alternate image
-   wxImage* mImageMuteDisabled;
-   wxImage* mImageSoloUp;
-   wxImage* mImageSoloOver;
-   wxImage* mImageSoloDown;
-   wxImage* mImageSoloDisabled;
+   std::unique_ptr<wxImage> mImageMuteUp, mImageMuteOver, mImageMuteDown,
+      mImageMuteDownWhileSolo, // the one actually alternate image
+      mImageMuteDisabled, mImageSoloUp, mImageSoloOver, mImageSoloDown, mImageSoloDisabled;
 
    int mMuteSoloWidth;
 

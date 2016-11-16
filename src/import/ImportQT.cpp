@@ -13,6 +13,7 @@
 **********************************************************************/
 
 #include "../Audacity.h"
+#include "ImportQT.h"
 #include "ImportPlugin.h"
 
 #define DESC _("QuickTime files")
@@ -26,13 +27,13 @@ static const wxChar *exts[] =
 
 #ifndef USE_QUICKTIME
 
-void GetQTImportPlugin(ImportPluginList *importPluginList,
-                       UnusableImportPluginList *unusableImportPluginList)
+void GetQTImportPlugin(ImportPluginList &importPluginList,
+                       UnusableImportPluginList &unusableImportPluginList)
 {
-   UnusableImportPlugin* qtIsUnsupported =
-      new UnusableImportPlugin(DESC, wxArrayString(WXSIZEOF(exts), exts));
-
-   unusableImportPluginList->Append(qtIsUnsupported);
+   unusableImportPluginList.push_back(
+      make_movable<UnusableImportPlugin>
+         (DESC, wxArrayString(WXSIZEOF(exts), exts))
+   );
 }
 
 #else /* USE_QUICKTIME */
@@ -66,7 +67,6 @@ void GetQTImportPlugin(ImportPluginList *importPluginList,
 #include "../Internat.h"
 #include "../Tags.h"
 #include "../WaveTrack.h"
-#include "ImportQT.h"
 
 #define kQTAudioPropertyID_MaxAudioSampleSize   'mssz'
 
@@ -135,7 +135,7 @@ class QTImportFileHandle final : public ImportFileHandle
    }
 
    wxString GetFileDescription();
-   int GetFileUncompressedBytes();
+   ByteCount GetFileUncompressedBytes() override;
 
    wxInt32 GetStreamCount()
    {
@@ -162,10 +162,10 @@ class QTImportFileHandle final : public ImportFileHandle
    Movie mMovie;
 };
 
-void GetQTImportPlugin(ImportPluginList *importPluginList,
-                       UnusableImportPluginList *unusableImportPluginList)
+void GetQTImportPlugin(ImportPluginList &importPluginList,
+                       UnusableImportPluginList &unusableImportPluginList)
 {
-   importPluginList->Append(new QTImportPlugin);
+   importPluginList.push_back( make_movable<QTImportPlugin>() );
 }
 
 wxString QTImportPlugin::GetPluginFormatDescription()
@@ -219,7 +219,7 @@ wxString QTImportFileHandle::GetFileDescription()
    return DESC;
 }
 
-int QTImportFileHandle::GetFileUncompressedBytes()
+auto QTImportFileHandle::GetFileUncompressedBytes() -> ByteCount
 {
    return 0;
 }
@@ -233,13 +233,13 @@ int QTImportFileHandle::Import(TrackFactory *trackFactory,
    OSErr err = noErr;
    MovieAudioExtractionRef maer = NULL;
    int updateResult = eProgressSuccess;
-   sampleCount totSamples = (sampleCount) GetMovieDuration(mMovie);
-   sampleCount numSamples = 0;
+   auto totSamples =
+      (sampleCount) GetMovieDuration(mMovie); // convert from TimeValue
+   decltype(totSamples) numSamples = 0;
    Boolean discrete = true;
    UInt32 quality = kQTAudioRenderQuality_Max;
    AudioStreamBasicDescription desc;
    UInt32 maxSampleSize;
-   UInt32 numchan;
    UInt32 bufsize;
    bool res = false;
 
@@ -295,7 +295,7 @@ int QTImportFileHandle::Import(TrackFactory *trackFactory,
          break;
       }
    
-      numchan = desc.mChannelsPerFrame;
+      auto numchan = desc.mChannelsPerFrame;
       bufsize = 5 * desc.mSampleRate;
    
       // determine sample format
@@ -360,8 +360,9 @@ int QTImportFileHandle::Import(TrackFactory *trackFactory,
    
          numSamples += numFrames;
    
-         updateResult = mProgress->Update((wxULongLong_t)numSamples,
-                                          (wxULongLong_t)totSamples);
+         updateResult = mProgress->Update(
+            numSamples.as_long_long(),
+            totSamples.as_long_long() );
    
          if (numFrames == 0 || flags & kQTMovieAudioExtractionComplete) {
             break;
@@ -391,7 +392,7 @@ int QTImportFileHandle::Import(TrackFactory *trackFactory,
       }
    } while (false);
 
-done:
+// done:
 
    if (maer) {
       MovieAudioExtractionEnd(maer);
@@ -440,7 +441,7 @@ void QTImportFileHandle::AddMetadata(Tags *tags)
 
    for (int i = 0; i < WXSIZEOF(names); i++) {
       QTMetaDataItem item = kQTMetaDataItemUninitialized;
-      OSType key = names[i].key;
+      // OSType key = names[i].key;
 
       err = QTMetaDataGetNextItem(metaDataRef,
                                   kQTMetaDataStorageFormatWildcard,
@@ -459,8 +460,8 @@ void QTImportFileHandle::AddMetadata(Tags *tags)
 
       QTPropertyValuePtr outValPtr = nil;
       QTPropertyValueType outPropType;
-      ByteCount outPropValueSize;
-      ByteCount outPropValueSizeUsed = 0;
+      ::ByteCount outPropValueSize;
+      ::ByteCount outPropValueSizeUsed = 0;
       UInt32 outPropFlags;
       UInt32 dataType;
 

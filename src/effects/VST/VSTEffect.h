@@ -49,6 +49,11 @@ typedef AEffect *(*vstPluginMain)(audioMasterCallback audioMaster);
 class VSTEffectTimer;
 class VSTEffectDialog;
 class VSTEffect;
+class wxDynamicLibrary;
+
+#if defined(__WXMAC__)
+struct __CFBundle;
+#endif
 
 ///////////////////////////////////////////////////////////////////////////////
 //
@@ -94,33 +99,33 @@ class VSTEffect final : public wxEvtHandler,
 
    bool SetHost(EffectHostInterface *host) override;
 
-   int GetAudioInCount() override;
-   int GetAudioOutCount() override;
+   unsigned GetAudioInCount() override;
+   unsigned GetAudioOutCount() override;
 
    int GetMidiInCount() override;
    int GetMidiOutCount() override;
 
    sampleCount GetLatency() override;
-   sampleCount GetTailSize() override;
+   size_t GetTailSize() override;
 
-   void SetSampleRate(sampleCount rate) override;
-   sampleCount SetBlockSize(sampleCount maxBlockSize) override;
+   void SetSampleRate(double rate) override;
+   size_t SetBlockSize(size_t maxBlockSize) override;
 
    bool IsReady() override;
    bool ProcessInitialize(sampleCount totalLen, ChannelNames chanMap = NULL) override;
    bool ProcessFinalize() override;
-   sampleCount ProcessBlock(float **inBlock, float **outBlock, sampleCount blockLen) override;
+   size_t ProcessBlock(float **inBlock, float **outBlock, size_t blockLen) override;
 
    bool RealtimeInitialize() override;
-   bool RealtimeAddProcessor(int numChannels, float sampleRate) override;
+   bool RealtimeAddProcessor(unsigned numChannels, float sampleRate) override;
    bool RealtimeFinalize() override;
    bool RealtimeSuspend() override;
    bool RealtimeResume() override;
    bool RealtimeProcessStart() override;
-   sampleCount RealtimeProcess(int group,
+   size_t RealtimeProcess(int group,
                                        float **inbuf,
                                        float **outbuf,
-                                       sampleCount numSamples) override;
+                                       size_t numSamples) override;
    bool RealtimeProcessEnd() override;
 
    bool ShowInterface(wxWindow *parent, bool forceModal = false) override;
@@ -178,8 +183,8 @@ private:
    static int b64decode(const wxString &in, void *out);
 
    // Realtime
-   int GetChannelCount();
-   void SetChannelCount(int numChannels);
+   unsigned GetChannelCount();
+   void SetChannelCount(unsigned numChannels);
 
    // UI
    void OnSlider(wxCommandEvent & evt);
@@ -244,16 +249,26 @@ private:
    void callSetChunk(bool isPgm, int len, void *buf, VstPatchChunkInfo *info);
 
  private:
+    // Define a manager class for a handle to a module
+#if defined(__WXMSW__)
+   using ModuleHandle = std::unique_ptr<wxDynamicLibrary>;
+#else
+   struct ModuleDeleter {
+      void operator() (void*) const;
+   };
+   using ModuleHandle = std::unique_ptr < char, ModuleDeleter > ;
+#endif
+
    EffectHostInterface *mHost;
    PluginID mID;
    wxString mPath;
-   int mAudioIns;
-   int mAudioOuts;
+   unsigned mAudioIns;
+   unsigned mAudioOuts;
    int mMidiIns;
    int mMidiOuts;
    bool mAutomatable;
    float mSampleRate;
-   sampleCount mUserBlockSize;
+   int mUserBlockSize;
    wxString mName;
    wxString mVendor;
    wxString mDescription;
@@ -265,11 +280,32 @@ private:
 
    bool mReady;
 
+   ModuleHandle mModule;
+
 #if defined(__WXMAC__)
-   void *mBundleRef;       // Cheating a little ... type is really CFBundle
-   int mResource;          // Cheating a little ... type is really CFBundle
+   // These members must be ordered after mModule
+
+   struct BundleDeleter {
+      void operator() (void*) const;
+   };
+   using BundleHandle = std::unique_ptr<
+      __CFBundle, BundleDeleter
+   >;
+
+   BundleHandle mBundleRef;
+
+   struct ResourceDeleter {
+      const BundleHandle *mpHandle;
+      ResourceDeleter(const BundleHandle *pHandle = nullptr)
+         : mpHandle(pHandle) {}
+      void operator() (void*) const;
+   };
+   using ResourceHandle = std::unique_ptr<
+      char, ResourceDeleter
+   >;
+   ResourceHandle mResource;
 #endif
-   void *mModule;
+
    AEffect *mAEffect;
 
    VstTimeInfo mTimeInfo;
@@ -277,7 +313,7 @@ private:
    bool mUseLatency;
    int mBufferDelay;
 
-   sampleCount mBlockSize;
+   int mBlockSize;
 
    int mProcessLevel;
    bool mHasPower;
@@ -286,16 +322,16 @@ private:
 
    wxCRIT_SECT_DECLARE_MEMBER(mDispatcherLock);
 
-   VSTEffectTimer *mTimer;
+   std::unique_ptr<VSTEffectTimer> mTimer;
    int mTimerGuard;
 
    // Realtime processing
    VSTEffect *mMaster;     // non-NULL if a slave
    VSTEffectArray mSlaves;
-   int mNumChannels;
+   unsigned mNumChannels;
    float **mMasterIn;
    float **mMasterOut;
-   sampleCount mNumSamples;
+   size_t mNumSamples;
 
    // UI
    wxDialog *mDialog;
@@ -318,7 +354,7 @@ private:
    long mXMLVersion;
    VstPatchChunkInfo mXMLInfo;
    
-   DECLARE_EVENT_TABLE();
+   DECLARE_EVENT_TABLE()
 
    friend class VSTEffectsModule;
 };

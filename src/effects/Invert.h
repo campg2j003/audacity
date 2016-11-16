@@ -37,9 +37,9 @@ public:
 
    // EffectClientInterface implementation
 
-   int GetAudioInCount() override;
-   int GetAudioOutCount() override;
-   sampleCount ProcessBlock(float **inBlock, float **outBlock, sampleCount blockLen) override;
+   unsigned GetAudioInCount() override;
+   unsigned GetAudioOutCount() override;
+   size_t ProcessBlock(float **inBlock, float **outBlock, size_t blockLen) override;
 };
 
 #endif

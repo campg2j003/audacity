@@ -86,7 +86,7 @@ enum
 };
 
 // Protect Nyquist from selections greater than 2^31 samples (bug 439)
-#define NYQ_MAX_LEN ((sampleCount) 2147483647)
+#define NYQ_MAX_LEN (std::numeric_limits<long>::max())
 
 #define UNINITIALIZED_CONTROL ((double)99999999.99)
 
@@ -126,8 +126,8 @@ NyquistEffect::NyquistEffect(const wxString &fName)
    mDebug = false;
    mIsSal = false;
    mOK = false;
-   mAuthor = wxT("N/A");
-   mCopyright = wxT("N/A");
+   mAuthor = XO("n/a");
+   mCopyright = XO("n/a");
 
    // set clip/split handling when applying over clip boundary.
    mRestoreSplits = true;  // Default: Restore split lines. 
@@ -201,7 +201,7 @@ wxString NyquistEffect::GetVendor()
 
 wxString NyquistEffect::GetVersion()
 {
-   return wxT("N/A");
+   return XO("n/a");
 }
 
 wxString NyquistEffect::GetDescription()
@@ -456,7 +456,7 @@ bool NyquistEffect::Process()
    // correct sync-lock group behavior when the timeline is affected; then we just want
    // to operate on the selected wave tracks
    CopyInputTracks(Track::All);
-   SelectedTrackListOfKindIterator iter(Track::Wave, mOutputTracks);
+   SelectedTrackListOfKindIterator iter(Track::Wave, mOutputTracks.get());
    mCurTrack[0] = (WaveTrack *) iter.First();
    mOutputTime = 0;
    mCount = 0;
@@ -472,7 +472,7 @@ bool NyquistEffect::Process()
    mTrackIndex = 0;
 
    mNumSelectedChannels = 0;
-   SelectedTrackListOfKindIterator sel(Track::Wave, mOutputTracks);
+   SelectedTrackListOfKindIterator sel(Track::Wave, mOutputTracks.get());
    for (WaveTrack *t = (WaveTrack *) sel.First(); t; t = (WaveTrack *) sel.Next()) {
       mNumSelectedChannels++;
       if (mT1 >= mT0) {
@@ -620,24 +620,28 @@ bool NyquistEffect::Process()
          }
 
          // Check whether we're in the same group as the last selected track
-         SyncLockedTracksIterator gIter(mOutputTracks);
+         SyncLockedTracksIterator gIter(mOutputTracks.get());
          Track *gt = gIter.StartWith(mCurTrack[0]);
          mFirstInGroup = !gtLast || (gtLast != gt);
          gtLast = gt;
 
          mCurStart[0] = mCurTrack[0]->TimeToLongSamples(mT0);
-         sampleCount end = mCurTrack[0]->TimeToLongSamples(mT1);
-         mCurLen = (sampleCount)(end - mCurStart[0]);
+         auto end = mCurTrack[0]->TimeToLongSamples(mT1);
+         mCurLen = end - mCurStart[0];
 
          if (mCurLen > NYQ_MAX_LEN) {
-            wxMessageBox(_("Selection too long for Nyquist code.\nMaximum allowed selection is 2147483647 samples\n(about 13.5 hours at 44100 Hz sample rate)."),
-                         _("Nyquist Error"), wxOK | wxCENTRE);
+            float hours = (float)NYQ_MAX_LEN / (44100 * 60 * 60);
+            const auto message = wxString::Format(
+_("Selection too long for Nyquist code.\nMaximum allowed selection is %ld samples\n(about %.1f hours at 44100 Hz sample rate)."),
+               (long)NYQ_MAX_LEN, hours
+            );
+            wxMessageBox(message, _("Nyquist Error"), wxOK | wxCENTRE);
             if (!mProjectChanged)
                em.SetSkipStateFlag(true);
             return false;
          }
 
-         if (mCurLen > mMaxLen) mCurLen = mMaxLen;
+         mCurLen = std::min(mCurLen, mMaxLen);
 
          mProgressIn = 0.0;
          mProgressOut = 0.0;
@@ -932,15 +936,14 @@ bool NyquistEffect::ProcessOne()
       float maxPeak = 0.0;
       wxString clips;
       for (int i = 0; i < mCurNumChannels; i++) {
-         WaveClipArray ca;
-         mCurTrack[i]->FillSortedClipArray(ca);
+         auto ca = mCurTrack[i]->SortedClipArray();
          // A list of clips for mono, or an array of lists for multi-channel.
          if (mCurNumChannels > 1) clips += wxT("(list ");
          // Each clip is a list (start-time, end-time)
-         for (size_t j = 0; j < ca.GetCount(); j++) {
+         for (const auto clip: ca) {
             clips += wxString::Format(wxT("(list (float %s) (float %s))"),
-                                      Internat::ToString(ca[j]->GetStartTime()).c_str(),
-                                      Internat::ToString(ca[j]->GetEndTime()).c_str());
+                                      Internat::ToString(clip->GetStartTime()).c_str(),
+                                      Internat::ToString(clip->GetEndTime()).c_str());
          }
          if (mCurNumChannels > 1) clips += wxT(" )");
 
@@ -960,11 +963,21 @@ bool NyquistEffect::ProcessOne()
       nyx_set_audio_params(mCurTrack[0]->GetRate(), 0);
    }
    else {
-      nyx_set_audio_params(mCurTrack[0]->GetRate(), mCurLen);
+      // UNSAFE_SAMPLE_COUNT_TRUNCATION
+      // Danger!  Truncation of long long to long!
+      // Don't say we didn't warn you!
+
+      // Note mCurLen was elsewhere limited to mMaxLen, which is normally
+      // the greatest long value, and yet even mMaxLen may be experimentally
+      // increased with a nyquist comment directive.
+      // See the parsing of "maxlen"
+
+      auto curLen = long(mCurLen.as_long_long());
+      nyx_set_audio_params(mCurTrack[0]->GetRate(), curLen);
 
       nyx_set_input_audio(StaticGetCallback, (void *)this,
                           mCurNumChannels,
-                          mCurLen, mCurTrack[0]->GetRate());
+                          curLen, mCurTrack[0]->GetRate());
    }
 
    // Restore the Nyquist sixteenth note symbol for Generate plugins.
@@ -1111,7 +1124,7 @@ bool NyquistEffect::ProcessOne()
       unsigned int l;
       LabelTrack *ltrack = NULL;
 
-      TrackListIterator iter(mOutputTracks);
+      TrackListIterator iter(mOutputTracks.get());
       for (Track *t = iter.First(); t; t = iter.Next()) {
          if (t->GetKind() == Track::Label) {
             ltrack = (LabelTrack *)t;
@@ -1143,9 +1156,7 @@ bool NyquistEffect::ProcessOne()
       return false;
    }
 
-   int outChannels;
-
-   outChannels = nyx_get_audio_num_channels();
+   auto outChannels = nyx_get_audio_num_channels();
    if (outChannels > mCurNumChannels) {
       wxMessageBox(_("Nyquist returned too many audio channels.\n"),
                    wxT("Nyquist"),
@@ -1197,8 +1208,8 @@ bool NyquistEffect::ProcessOne()
          wxMessageBox(_("Nyquist did not return audio.\n"),
                       wxT("Nyquist"),
                       wxOK | wxCENTRE, mUIParent);
-         for (i = 0; i < outChannels; i++) {
-            mOutputTrack[i].reset();
+         for (int j = 0; j < outChannels; j++) {
+            mOutputTrack[j].reset();
          }
          return true;
       }
@@ -1226,7 +1237,7 @@ bool NyquistEffect::ProcessOne()
          
       // If we were first in the group adjust non-selected group tracks
       if (mFirstInGroup) {
-         SyncLockedTracksIterator git(mOutputTracks);
+         SyncLockedTracksIterator git(mOutputTracks.get());
          Track *t;
          for (t = git.StartWith(mCurTrack[i]); t; t = git.Next())
          {
@@ -1727,9 +1738,9 @@ int NyquistEffect::GetCallback(float *buffer, int ch,
          mCurBufferLen[ch] = mCurTrack[ch]->GetIdealBlockSize();
       }
 
-      if (mCurBufferStart[ch] + mCurBufferLen[ch] > mCurStart[ch] + mCurLen) {
-         mCurBufferLen[ch] = mCurStart[ch] + mCurLen - mCurBufferStart[ch];
-      }
+      mCurBufferLen[ch] =
+         limitSampleBufferSize( mCurBufferLen[ch],
+                                mCurStart[ch] + mCurLen - mCurBufferStart[ch] );
 
       mCurBuffer[ch].Allocate(mCurBufferLen[ch], floatSample);
       if (!mCurTrack[ch]->Get(mCurBuffer[ch].ptr(), floatSample,
@@ -1741,13 +1752,16 @@ int NyquistEffect::GetCallback(float *buffer, int ch,
       }
    }
 
-   long offset = (mCurStart[ch] + start) - mCurBufferStart[ch];
+   // We have guaranteed above that this is nonnegative and bounded by
+   // mCurBufferLen[ch]:
+   auto offset = ( mCurStart[ch] + start - mCurBufferStart[ch] ).as_size_t();
    CopySamples(mCurBuffer[ch].ptr() + offset*SAMPLE_SIZE(floatSample), floatSample,
                (samplePtr)buffer, floatSample,
                len);
 
    if (ch == 0) {
-      double progress = mScale*(((float)start+len)/mCurLen);
+      double progress = mScale *
+         ( (start+len)/ mCurLen.as_double() );
 
       if (progress > mProgressIn) {
          mProgressIn = progress;
@@ -2228,7 +2242,7 @@ void NyquistEffect::OnText(wxCommandEvent & evt)
 ///////////////////////////////////////////////////////////////////////////////
 
 
-BEGIN_EVENT_TABLE(NyquistOutputDialog, wxDialog)
+BEGIN_EVENT_TABLE(NyquistOutputDialog, wxDialogWrapper)
    EVT_BUTTON(wxID_OK, NyquistOutputDialog::OnOk)
 END_EVENT_TABLE()
 
@@ -2236,7 +2250,7 @@ NyquistOutputDialog::NyquistOutputDialog(wxWindow * parent, wxWindowID id,
                                        const wxString & title,
                                        const wxString & prompt,
                                        const wxString &message)
-:  wxDialog(parent, id, title)
+:  wxDialogWrapper(parent, id, title)
 {
    SetName(GetTitle());
 

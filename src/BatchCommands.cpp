@@ -460,7 +460,7 @@ wxString BatchCommands::BuildCleanFileName(const wxString &fileName, const wxStr
 
 bool BatchCommands::WriteMp3File( const wxString & Name, int bitrate )
 {  //check if current project is mono or stereo
-   int numChannels = 2;
+   unsigned numChannels = 2;
    if (IsMono()) {
       numChannels = 1;
    }
@@ -509,7 +509,7 @@ bool BatchCommands::ApplySpecialCommand(int WXUNUSED(iCommand), const wxString &
 
    AudacityProject *project = GetActiveProject();
 
-   int numChannels = 1;    //used to switch between mono and stereo export
+   unsigned numChannels = 1;    //used to switch between mono and stereo export
    if (IsMono()) {
       numChannels = 1;  //export in mono
    } else {
@@ -535,7 +535,7 @@ bool BatchCommands::ApplySpecialCommand(int WXUNUSED(iCommand), const wxString &
 
    // We have a command index, but we don't use it!
    // TODO: Make this special-batch-command code use the menu item code....
-   // FIXME: No error reporting on write file failure in batch mode.
+   // FIXME: TRAP_ERR No error reporting on write file failure in batch mode.
    if (command == wxT("NoAction")) {
       return true;
    } else if (!mFileName.IsEmpty() && command == wxT("Import")) {
@@ -594,8 +594,8 @@ bool BatchCommands::ApplyEffectCommand(const PluginID & ID, const wxString & com
 
    AudacityProject *project = GetActiveProject();
 
-   //FIXME: for later versions may want to not select-all in batch mode.
-   //IF nothing selected, THEN select everything
+   // FIXME: for later versions may want to not select-all in batch mode.
+   // IF nothing selected, THEN select everything
    // (most effects require that you have something selected).
    project->SelectAllIfNone();
 

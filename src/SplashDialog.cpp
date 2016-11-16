@@ -51,15 +51,15 @@ enum
    DontShowID=1000,
 };
 
-BEGIN_EVENT_TABLE(SplashDialog, wxDialog)
+BEGIN_EVENT_TABLE(SplashDialog, wxDialogWrapper)
    EVT_BUTTON(wxID_OK, SplashDialog::OnOK)
    EVT_CHECKBOX( DontShowID, SplashDialog::OnDontShow )
 END_EVENT_TABLE()
 
-IMPLEMENT_CLASS(SplashDialog, wxDialog)
+IMPLEMENT_CLASS(SplashDialog, wxDialogWrapper)
 
 SplashDialog::SplashDialog(wxWindow * parent)
-   :  wxDialog(parent, -1, _("Welcome to Audacity!"),
+   :  wxDialogWrapper(parent, -1, _("Welcome to Audacity!"),
       wxPoint( -1, 60 ), // default x position, y position 60 pixels from top of screen.
       wxDefaultSize, wxDEFAULT_DIALOG_STYLE | wxRESIZE_BORDER)
 {
@@ -83,7 +83,7 @@ void SplashDialog::Populate( ShuttleGui & S )
    S.StartVerticalLay(1);
 
    //v For now, change to AudacityLogoWithName via old-fashioned ways, not Theme.
-   m_pLogo = new wxBitmap((const char **) AudacityLogoWithName_xpm); //v
+   m_pLogo = std::make_unique<wxBitmap>((const char **) AudacityLogoWithName_xpm); //v
 
    // JKC: Resize to 50% of size.  Later we may use a smaller xpm as
    // our source, but this allows us to tweak the size - if we want to.
@@ -91,14 +91,14 @@ void SplashDialog::Populate( ShuttleGui & S )
    const float fScale=0.5f;// smaller size.
    wxImage RescaledImage( m_pLogo->ConvertToImage() );
    // wxIMAGE_QUALITY_HIGH not supported by wxWidgets 2.6.1, or we would use it here.
-   RescaledImage.Rescale( int(LOGOWITHNAME_WIDTH * fScale), int(LOGOWITHNAME_HEIGHT *fScale) );
+   RescaledImage.Rescale( (int)(LOGOWITHNAME_WIDTH * fScale), (int)(LOGOWITHNAME_HEIGHT *fScale) );
    wxBitmap RescaledBitmap( RescaledImage );
    wxStaticBitmap *const icon =
        safenew wxStaticBitmap(S.GetParent(), -1,
                           //*m_pLogo, //v theTheme.Bitmap(bmpAudacityLogoWithName),
                           RescaledBitmap,
                           wxDefaultPosition,
-                          wxSize(int(LOGOWITHNAME_WIDTH*fScale), int(LOGOWITHNAME_HEIGHT*fScale)));
+                          wxSize((int)(LOGOWITHNAME_WIDTH*fScale), (int)(LOGOWITHNAME_HEIGHT*fScale)));
 
    S.Prop(0).AddWindow( icon );
 
@@ -123,7 +123,6 @@ void SplashDialog::Populate( ShuttleGui & S )
 
 SplashDialog::~SplashDialog()
 {
-   delete m_pLogo;
 }
 
 void SplashDialog::OnDontShow( wxCommandEvent & Evt )
@@ -143,7 +142,9 @@ void SplashDialog::Show2( wxWindow * pParent )
 {
    if( pSelf == NULL )
    {
-      pSelf = new SplashDialog( pParent );
+      // pParent owns it
+      wxASSERT(pParent);
+      pSelf = safenew SplashDialog( pParent );
    }
    pSelf->mpHtml->SetPage(HelpText( wxT("welcome") ));
    pSelf->Show( true );

@@ -20,10 +20,10 @@
 *//*******************************************************************/
 
 #include "../Audacity.h"
+#include "ImportPCM.h"
 #include "../AudacityApp.h"
 #include "../Internat.h"
 #include "../Tags.h"
-#include "ImportPCM.h"
 
 #include <wx/wx.h>
 #include <wx/string.h>
@@ -93,7 +93,7 @@ public:
    ~PCMImportFileHandle();
 
    wxString GetFileDescription();
-   int GetFileUncompressedBytes();
+   ByteCount GetFileUncompressedBytes() override;
    int Import(TrackFactory *trackFactory, TrackHolders &outTracks,
               Tags *tags) override;
 
@@ -109,14 +109,14 @@ public:
 
 private:
    SFFile                mFile;
-   SF_INFO               mInfo;
+   const SF_INFO         mInfo;
    sampleFormat          mFormat;
 };
 
-void GetPCMImportPlugin(ImportPluginList * importPluginList,
-                        UnusableImportPluginList * WXUNUSED(unusableImportPluginList))
+void GetPCMImportPlugin(ImportPluginList & importPluginList,
+                        UnusableImportPluginList & WXUNUSED(unusableImportPluginList))
 {
-   importPluginList->Append(new PCMImportPlugin);
+   importPluginList.push_back( make_movable<PCMImportPlugin>() );
 }
 
 wxString PCMImportPlugin::GetPluginFormatDescription()
@@ -194,6 +194,8 @@ PCMImportFileHandle::PCMImportFileHandle(wxString name,
    mFile(std::move(file)),
    mInfo(info)
 {
+   wxASSERT(info.channels >= 0);
+
    //
    // Figure out the format to use.
    //
@@ -215,7 +217,7 @@ wxString PCMImportFileHandle::GetFileDescription()
    return SFCall<wxString>(sf_header_name, mInfo.format);
 }
 
-int PCMImportFileHandle::GetFileUncompressedBytes()
+auto PCMImportFileHandle::GetFileUncompressedBytes() -> ByteCount
 {
    return mInfo.frames * mInfo.channels * SAMPLE_SIZE(mFormat);
 }
@@ -242,7 +244,7 @@ static wxString AskCopyOrEdit()
    // check the current preferences for whether or not we should ask the user about this.
    if (oldAskPref) {
       wxString newCopyPref = wxT("copy");
-      wxDialog dialog(NULL, -1, wxString(_("Warning")));
+      wxDialogWrapper dialog(nullptr, -1, wxString(_("Warning")));
       dialog.SetName(dialog.GetTitle());
 
       wxBoxSizer *vbox;
@@ -367,8 +369,9 @@ int PCMImportFileHandle::Import(TrackFactory *trackFactory,
       channels.begin()->get()->SetLinked(true);
    }
 
-   sampleCount fileTotalFrames = (sampleCount)mInfo.frames;
-   sampleCount maxBlockSize = channels.begin()->get()->GetMaxBlockSize();
+   auto fileTotalFrames =
+      (sampleCount)mInfo.frames; // convert from sf_count_t
+   auto maxBlockSize = channels.begin()->get()->GetMaxBlockSize();
    int updateResult = false;
 
    // If the format is not seekable, we must use 'copy' mode,
@@ -387,28 +390,35 @@ int PCMImportFileHandle::Import(TrackFactory *trackFactory,
       bool useOD =fileTotalFrames>kMinimumODFileSampleSize;
       int updateCounter = 0;
 
-      for (sampleCount i = 0; i < fileTotalFrames; i += maxBlockSize) {
+      for (decltype(fileTotalFrames) i = 0; i < fileTotalFrames; i += maxBlockSize) {
 
-         sampleCount blockLen = maxBlockSize;
-         if (i + blockLen > fileTotalFrames)
-            blockLen = fileTotalFrames - i;
+         const auto blockLen =
+            limitSampleBufferSize( maxBlockSize, fileTotalFrames - i );
 
          auto iter = channels.begin();
          for (int c = 0; c < mInfo.channels; ++iter, ++c)
             iter->get()->AppendAlias(mFilename, i, blockLen, c,useOD);
 
          if (++updateCounter == 50) {
-            updateResult = mProgress->Update(i, fileTotalFrames);
+            updateResult = mProgress->Update(
+               i.as_long_long(),
+               fileTotalFrames.as_long_long()
+            );
             updateCounter = 0;
             if (updateResult != eProgressSuccess)
                break;
          }
       }
-      updateResult = mProgress->Update(fileTotalFrames, fileTotalFrames);
+
+      // One last update for completion
+      updateResult = mProgress->Update(
+         fileTotalFrames.as_long_long(),
+         fileTotalFrames.as_long_long()
+      );
 
       if(useOD)
       {
-         ODComputeSummaryTask* computeTask=new ODComputeSummaryTask;
+         auto computeTask = make_movable<ODComputeSummaryTask>();
          bool moreThanStereo = mInfo.channels>2;
          for (const auto &channel : channels)
          {
@@ -416,13 +426,13 @@ int PCMImportFileHandle::Import(TrackFactory *trackFactory,
             if(moreThanStereo)
             {
                //if we have 3 more channels, they get imported on seperate tracks, so we add individual tasks for each.
-               ODManager::Instance()->AddNewTask(computeTask);
-               computeTask=new ODComputeSummaryTask;
+               ODManager::Instance()->AddNewTask(std::move(computeTask));
+               computeTask = make_movable<ODComputeSummaryTask>();
             }
          }
          //if we have a linked track, we add ONE task.
          if(!moreThanStereo)
-            ODManager::Instance()->AddNewTask(computeTask);
+            ODManager::Instance()->AddNewTask(std::move(computeTask));
       }
    }
    else {
@@ -431,24 +441,28 @@ int PCMImportFileHandle::Import(TrackFactory *trackFactory,
       // samples in the tracks.
 
       // PRL:  guard against excessive memory buffer allocation in case of many channels
-      sampleCount maxBlock = std::min(maxBlockSize,
-         sampleCount(std::numeric_limits<int>::max() /
-                 (mInfo.channels * SAMPLE_SIZE(mFormat)))
+      using type = decltype(maxBlockSize);
+      if (mInfo.channels < 1)
+         return eProgressFailed;
+      auto maxBlock = std::min(maxBlockSize,
+         std::numeric_limits<type>::max() /
+            (mInfo.channels * SAMPLE_SIZE(mFormat))
       );
       if (maxBlock < 1)
          return eProgressFailed;
 
       SampleBuffer srcbuffer;
+      wxASSERT(mInfo.channels >= 0);
       while (NULL == srcbuffer.Allocate(maxBlock * mInfo.channels, mFormat).ptr())
       {
-         maxBlock >>= 1;
+         maxBlock /= 2;
          if (maxBlock < 1)
             return eProgressFailed;
       }
 
       SampleBuffer buffer(maxBlock, mFormat);
 
-      unsigned long framescompleted = 0;
+      decltype(fileTotalFrames) framescompleted = 0;
 
       long block;
       do {
@@ -479,8 +493,10 @@ int PCMImportFileHandle::Import(TrackFactory *trackFactory,
             framescompleted += block;
          }
 
-         updateResult = mProgress->Update((long long unsigned)framescompleted,
-                                        (long long unsigned)fileTotalFrames);
+         updateResult = mProgress->Update(
+            framescompleted.as_long_long(),
+            fileTotalFrames.as_long_long()
+         );
          if (updateResult != eProgressSuccess)
             break;
 

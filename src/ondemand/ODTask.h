@@ -55,7 +55,7 @@ class ODTask /* not final */
    virtual ~ODTask(){};
 
    //clones everything except information about the tracks.
-   virtual std::unique_ptr<ODTask> Clone() const = 0;
+   virtual movable_ptr<ODTask> Clone() const = 0;
 
    ///Subclasses should override to return respective type.
    virtual unsigned int GetODType(){return eODNone;}
@@ -159,7 +159,7 @@ class ODTask /* not final */
    std::vector<WaveTrack*> mWaveTracks;
    ODLock     mWaveTrackMutex;
 
-   volatile sampleCount mDemandSample;
+   sampleCount mDemandSample;
    mutable ODLock      mDemandSampleMutex;
 
    volatile bool mIsRunning;

@@ -53,7 +53,7 @@ class MeterToolBar final : public ToolBar {
    wxSize GetDockedSize();
 
  private:
-   void RegenerateTooltips();
+   void RegenerateTooltips() override;
 
    AudacityProject *mProject;
    int mWhichMeters;
@@ -63,8 +63,8 @@ class MeterToolBar final : public ToolBar {
 
  public:
 
-   DECLARE_CLASS(MeterToolBar);
-   DECLARE_EVENT_TABLE();
+   DECLARE_CLASS(MeterToolBar)
+   DECLARE_EVENT_TABLE()
 
 };
 

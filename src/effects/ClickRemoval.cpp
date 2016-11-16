@@ -162,7 +162,7 @@ bool EffectClickRemoval::Process()
    bool bGoodResult = true;
    mbDidSomething = false;
 
-   SelectedTrackListOfKindIterator iter(Track::Wave, mOutputTracks);
+   SelectedTrackListOfKindIterator iter(Track::Wave, mOutputTracks.get());
    WaveTrack *track = (WaveTrack *) iter.First();
    int count = 0;
    while (track) {
@@ -172,9 +172,9 @@ bool EffectClickRemoval::Process()
       double t1 = mT1 > trackEnd? trackEnd: mT1;
 
       if (t1 > t0) {
-         sampleCount start = track->TimeToLongSamples(t0);
-         sampleCount end = track->TimeToLongSamples(t1);
-         sampleCount len = (sampleCount)(end - start);
+         auto start = track->TimeToLongSamples(t0);
+         auto end = track->TimeToLongSamples(t1);
+         auto len = end - start;
 
          if (!ProcessOne(count, track, start, len))
          {
@@ -198,46 +198,42 @@ bool EffectClickRemoval::Process()
 
 bool EffectClickRemoval::ProcessOne(int count, WaveTrack * track, sampleCount start, sampleCount len)
 {
-   if (len <= windowSize/2)
+   if (len <= windowSize / 2)
    {
       wxMessageBox(
-         wxString::Format(_("Selection must be larger than %d samples."), windowSize/2),
+         wxString::Format(_("Selection must be larger than %d samples."),
+                          windowSize / 2),
          GetName(),
          wxOK | wxICON_ERROR);
       return false;
    }
 
-   sampleCount idealBlockLen = track->GetMaxBlockSize() * 4;
+   auto idealBlockLen = track->GetMaxBlockSize() * 4;
    if (idealBlockLen % windowSize != 0)
       idealBlockLen += (windowSize - (idealBlockLen % windowSize));
 
    bool bResult = true;
-   sampleCount s = 0;
+   decltype(len) s = 0;
    float *buffer = new float[idealBlockLen];
    float *datawindow = new float[windowSize];
-   while ((s < len)  &&  ((len - s) > windowSize/2))
+   while ((len - s) > windowSize / 2)
    {
-      sampleCount block = idealBlockLen;
-      if (s + block > len)
-         block = len - s;
+      auto block = limitSampleBufferSize( idealBlockLen, len - s );
 
       track->Get((samplePtr) buffer, floatSample, start + s, block);
 
-      for (int i=0; i < (block-windowSize/2); i += windowSize/2)
+      for (decltype(block) i = 0; i + windowSize / 2 < block; i += windowSize / 2)
       {
-         int wcopy = windowSize;
-         if (i + wcopy > block)
-            wcopy = block - i;
+         auto wcopy = std::min( windowSize, block - i );
 
-         int j;
-         for(j=0; j<wcopy; j++)
+         for(decltype(wcopy) j = 0; j < wcopy; j++)
             datawindow[j] = buffer[i+j];
-         for(j=wcopy; j<windowSize; j++)
+         for(auto j = wcopy; j < windowSize; j++)
             datawindow[j] = 0;
 
          mbDidSomething |= RemoveClicks(windowSize, datawindow);
 
-         for(j=0; j<wcopy; j++)
+         for(decltype(wcopy) j = 0; j < wcopy; j++)
            buffer[i+j] = datawindow[j];
       }
 
@@ -246,7 +242,8 @@ bool EffectClickRemoval::ProcessOne(int count, WaveTrack * track, sampleCount st
 
       s += block;
 
-      if (TrackProgress(count, s / (double) len)) {
+      if (TrackProgress(count, s.as_double() /
+                               len.as_double())) {
          bResult = false;
          break;
       }
@@ -258,7 +255,7 @@ bool EffectClickRemoval::ProcessOne(int count, WaveTrack * track, sampleCount st
    return bResult;
 }
 
-bool EffectClickRemoval::RemoveClicks(sampleCount len, float *buffer)
+bool EffectClickRemoval::RemoveClicks(int len, float *buffer)
 {
    bool bResult = false; // This effect usually does nothing.
    int i;

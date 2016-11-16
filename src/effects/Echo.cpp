@@ -68,12 +68,12 @@ EffectType EffectEcho::GetType()
 
 // EffectClientInterface implementation
 
-int EffectEcho::GetAudioInCount()
+unsigned EffectEcho::GetAudioInCount()
 {
    return 1;
 }
 
-int EffectEcho::GetAudioOutCount()
+unsigned EffectEcho::GetAudioOutCount()
 {
    return 1;
 }
@@ -86,8 +86,22 @@ bool EffectEcho::ProcessInitialize(sampleCount WXUNUSED(totalLen), ChannelNames 
    }
 
    histPos = 0;
-   histLen = (sampleCount) (mSampleRate * delay);
-   history = new float[histLen];
+   auto requestedHistLen = (sampleCount) (mSampleRate * delay);
+
+   // Guard against extreme delay values input by the user
+   try {
+      // Guard against huge delay values from the user.
+      // Don't violate the assertion in as_size_t
+      if (requestedHistLen !=
+            (histLen = static_cast<size_t>(requestedHistLen.as_long_long())))
+         throw std::bad_alloc{};
+      history = new float[histLen];
+   }
+   catch ( const std::bad_alloc& ) {
+      wxMessageBox(_("Requested value exceeds memory capacity."));
+      return false;
+   }
+
    memset(history, 0, sizeof(float) * histLen);
    
    return history != NULL;
@@ -100,12 +114,12 @@ bool EffectEcho::ProcessFinalize()
    return true;
 }
 
-sampleCount EffectEcho::ProcessBlock(float **inBlock, float **outBlock, sampleCount blockLen)
+size_t EffectEcho::ProcessBlock(float **inBlock, float **outBlock, size_t blockLen)
 {
    float *ibuf = inBlock[0];
    float *obuf = outBlock[0];
 
-   for (sampleCount i = 0; i < blockLen; i++, histPos++)
+   for (decltype(blockLen) i = 0; i < blockLen; i++, histPos++)
    {
       if (histPos == histLen)
       {

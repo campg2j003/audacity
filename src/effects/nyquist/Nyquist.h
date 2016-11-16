@@ -205,7 +205,7 @@ private:
    int               mVersion;
    NyqControlArray   mControls;
 
-   int               mCurNumChannels;
+   unsigned          mCurNumChannels;
    WaveTrack         *mCurTrack[2];
    sampleCount       mCurStart[2];
    sampleCount       mCurLen;
@@ -213,8 +213,8 @@ private:
    int               mTrackIndex;
    bool              mFirstInGroup;
    double            mOutputTime;
-   int               mCount;
-   int               mNumSelectedChannels;
+   unsigned          mCount;
+   unsigned          mNumSelectedChannels;
    double            mProgressIn;
    double            mProgressOut;
    double            mProgressTot;
@@ -222,7 +222,7 @@ private:
 
    SampleBuffer      mCurBuffer[2];
    sampleCount       mCurBufferStart[2];
-   sampleCount       mCurBufferLen[2];
+   size_t            mCurBufferLen[2];
 
    std::unique_ptr<WaveTrack> mOutputTrack[2];
 
@@ -237,12 +237,12 @@ private:
    wxTextCtrl *mCommandText;
    wxCheckBox *mVersionCheckBox;
 
-   DECLARE_EVENT_TABLE();
+   DECLARE_EVENT_TABLE()
 
    friend class NyquistEffectsModule;
 };
 
-class NyquistOutputDialog final : public wxDialog
+class NyquistOutputDialog final : public wxDialogWrapper
 {
 public:
    NyquistOutputDialog(wxWindow * parent, wxWindowID id,
@@ -254,7 +254,7 @@ private:
    void OnOk(wxCommandEvent & event);
 
 private:
-   DECLARE_EVENT_TABLE();
+   DECLARE_EVENT_TABLE()
 };
 
 

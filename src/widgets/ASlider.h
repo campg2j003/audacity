@@ -15,11 +15,12 @@
 
 #include "../Experimental.h"
 
+#include "../MemoryX.h"
 #include <wx/defs.h>
 #include <wx/window.h>
-#include <wx/dialog.h>
 #include <wx/panel.h>
 #include <wx/timer.h>
+#include "widgets/wxPanelWrapper.h"
 
 #if wxUSE_ACCESSIBILITY
 #include <wx/access.h>
@@ -227,16 +228,12 @@ class LWSlider
 
    wxWindowID mID;
 
-   TipPanel *mTipPanel;
+   std::unique_ptr<TipPanel> mTipPanel;
    wxString mTipTemplate;
-   wxTimer mTimer;
-
-   Ruler* mpRuler;
 
    bool mIsDragging;
 
-   wxBitmap *mBitmap;
-   wxBitmap *mThumbBitmap;
+   std::unique_ptr<wxBitmap> mBitmap, mThumbBitmap;
 
    // AD: True if this object owns *mThumbBitmap (sometimes mThumbBitmap points
    // to an object we shouldn't DELETE) -- once we get theming totally right
@@ -264,6 +261,11 @@ class ASlider /* not final */ : public wxPanel
             float stepValue = STEP_CONTINUOUS,
             int orientation = wxHORIZONTAL);
    virtual ~ASlider();
+
+   bool AcceptsFocus() const override { return s_AcceptsFocus; }
+   bool AcceptsFocusFromKeyboard() const override { return true; }
+
+   void SetFocusFromKbd() override;
 
    void GetScroll(float & line, float & page);
    void SetScroll(float line, float page);
@@ -297,8 +299,16 @@ class ASlider /* not final */ : public wxPanel
    bool Enable(bool enable = true);
    bool IsEnabled() const;
 
+private:
+   static bool s_AcceptsFocus;
+   struct Resetter { void operator () (bool *p) const { if(p) *p = false; } };
+   using TempAllowFocus = std::unique_ptr<bool, Resetter>;
+
+public:
+   static TempAllowFocus TemporarilyAllowFocus();
+
  private:
-   LWSlider *mLWSlider;
+   std::unique_ptr<LWSlider> mLWSlider;
    bool mSliderIsFocused;
    wxTimer mTimer;
 
@@ -317,7 +327,7 @@ class ASlider /* not final */ : public wxPanel
 // This is a modal dialog that contains an ASlider
 // and a text-entry box which can be used to set the
 // value of a slider.
-class SliderDialog final : public wxDialog
+class SliderDialog final : public wxDialogWrapper
 {
  public:
    SliderDialog(wxWindow * parent, wxWindowID id,

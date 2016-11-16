@@ -192,7 +192,7 @@ enum {
    OnPreferencesID
 };
 
-BEGIN_EVENT_TABLE(Meter, wxPanel)
+BEGIN_EVENT_TABLE(Meter, wxPanelWrapper)
    EVT_TIMER(OnMeterUpdateID, Meter::OnMeterUpdate)
    EVT_MOUSE_EVENTS(Meter::OnMouse)
    EVT_CONTEXT_MENU(Meter::OnContext)
@@ -207,7 +207,7 @@ BEGIN_EVENT_TABLE(Meter, wxPanel)
    EVT_MENU(OnPreferencesID, Meter::OnPreferences)
 END_EVENT_TABLE()
 
-IMPLEMENT_CLASS(Meter, wxPanel)
+IMPLEMENT_CLASS(Meter, wxPanelWrapper)
 
 Meter::Meter(AudacityProject *project,
              wxWindow* parent, wxWindowID id,
@@ -216,7 +216,7 @@ Meter::Meter(AudacityProject *project,
              const wxSize& size /*= wxDefaultSize*/,
              Style style /*= HorizontalStereo*/,
              float fDecayRate /*= 60.0f*/)
-: wxPanel(parent, id, pos, size, wxTAB_TRAVERSAL | wxNO_BORDER | wxWANTS_CHARS),
+: wxPanelWrapper(parent, id, pos, size, wxTAB_TRAVERSAL | wxNO_BORDER | wxWANTS_CHARS),
    mProject(project),
    mQueue(1024),
    mWidth(size.x),
@@ -237,8 +237,8 @@ Meter::Meter(AudacityProject *project,
    mActive(false),
    mNumBars(0),
    mLayoutValid(false),
-   mBitmap(NULL),
-   mIcon(NULL),
+   mBitmap{},
+   mIcon{},
    mAccSilent(false)
 {
    // Suppress warnings about the header file
@@ -316,11 +316,13 @@ Meter::Meter(AudacityProject *project,
    {
       if(mIsInput)
       {
-         mIcon = new wxBitmap(MicMenuNarrow_xpm);
+         //mIcon = new wxBitmap(MicMenuNarrow_xpm);
+         mIcon = std::make_unique<wxBitmap>(wxBitmap(theTheme.Bitmap(bmpMic)));
       }
       else
       {
-         mIcon = new wxBitmap(SpeakerMenuNarrow_xpm);
+         //mIcon = new wxBitmap(SpeakerMenuNarrow_xpm);
+         mIcon = std::make_unique<wxBitmap>(wxBitmap(theTheme.Bitmap(bmpSpeaker)));
       }
    }
 
@@ -367,12 +369,8 @@ Meter::~Meter()
 
    // LLL:  This prevents a crash during termination if monitoring
    //       is active.
-   if (gAudioIO->IsMonitoring())
+   if (gAudioIO && gAudioIO->IsMonitoring())
       gAudioIO->StopStream();
-   if (mIcon)
-      delete mIcon;
-   if (mBitmap)
-      delete mBitmap;
 }
 
 void Meter::UpdatePrefs()
@@ -427,21 +425,16 @@ void Meter::OnErase(wxEraseEvent & WXUNUSED(event))
 void Meter::OnPaint(wxPaintEvent & WXUNUSED(event))
 {
 #if defined(__WXMAC__)
-   wxPaintDC *paintDC = new wxPaintDC(this);
+   auto paintDC = std::make_unique<wxPaintDC>(this);
 #else
-   wxDC *paintDC = wxAutoBufferedPaintDCFactory(this);
+   std::unique_ptr<wxDC> paintDC{ wxAutoBufferedPaintDCFactory(this) };
 #endif
    wxDC & destDC = *paintDC;
 
    if (mLayoutValid == false)
    {
-      if (mBitmap)
-      {
-         delete mBitmap;
-      }
-   
       // Create a NEW one using current size and select into the DC
-      mBitmap = new wxBitmap();
+      mBitmap = std::make_unique<wxBitmap>();
       mBitmap->Create(mWidth, mHeight, destDC);
       wxMemoryDC dc;
       dc.SelectObject(*mBitmap);
@@ -659,15 +652,11 @@ void Meter::OnPaint(wxPaintEvent & WXUNUSED(event))
       }
    }
 
-#if defined(__WXMSW__) || defined(__WXGTK__)
    if (mIsFocused)
    {
       wxRect r = mIconRect;
       AColor::DrawFocus(destDC, r.Inflate(1, 1));
    }
-#endif
-
-   delete paintDC;
 }
 
 void Meter::OnSize(wxSizeEvent & WXUNUSED(event))
@@ -724,7 +713,7 @@ void Meter::OnMouse(wxMouseEvent &evt)
          mi->Enable(!mActive || mMonitoring);
       }
 
-      menu.Append(OnPreferencesID, _("Preferences..."));
+      menu.Append(OnPreferencesID, _("Options..."));
 
       if (evt.RightDown()) {
          ShowMenu(evt.GetPosition());
@@ -879,10 +868,12 @@ static float floatMax(float a, float b)
    return a>b? a: b;
 }
 
+/* Unused as yet.
 static int intmin(int a, int b)
 {
    return a<b? a: b;
 }
+*/
 
 static int intmax(int a, int b)
 {
@@ -909,11 +900,11 @@ static float ToDB(float v, float range)
    return ClipZeroToOne((db + range) / range);
 }
 
-void Meter::UpdateDisplay(int numChannels, int numFrames, float *sampleData)
+void Meter::UpdateDisplay(unsigned numChannels, int numFrames, float *sampleData)
 {
    int i, j;
    float *sptr = sampleData;
-   int num = intmin(numChannels, mNumBars);
+   auto num = std::min(numChannels, mNumBars);
    MeterUpdateMsg msg;
 
    memset(&msg, 0, sizeof(msg));
@@ -951,7 +942,7 @@ void Meter::UpdateDisplay(int numChannels, int numFrames, float *sampleData)
 //                           // Need to make these double-indexed arrays if we handle more than 2 channels.
 //                           float* maxLeft, float* rmsLeft,
 //                           float* maxRight, float* rmsRight,
-//                           const sampleCount kSampleCount)
+//                           const size_t kSampleCount)
 //{
 //   int i, j;
 //   int num = intmin(numChannels, mNumBars);
@@ -1906,7 +1897,7 @@ void Meter::ShowMenu(const wxPoint & pos)
       mi->Enable(!mActive || mMonitoring);
    }
 
-   menu.Append(OnPreferencesID, _("Preferences..."));
+   menu.Append(OnPreferencesID, _("Options..."));
 
    mAccSilent = true;      // temporarily make screen readers say (close to) nothing on focus events
 
@@ -1951,12 +1942,12 @@ void Meter::OnPreferences(wxCommandEvent & WXUNUSED(event))
    wxRadioButton *vertical;
    int meterRefreshRate = mMeterRefreshRate;
 
-   wxString title(mIsInput ? _("Recording Meter Preferences") : _("Playback Meter Preferences"));
+   wxString title(mIsInput ? _("Recording Meter Options") : _("Playback Meter Options"));
 
    // Dialog is a child of the project, rather than of the toolbar.
    // This determines where it pops up.
 
-   wxDialog dlg(GetActiveProject(), wxID_ANY, title);
+   wxDialogWrapper dlg(GetActiveProject(), wxID_ANY, title);
    dlg.SetName(dlg.GetTitle());
    ShuttleGui S(&dlg, eIsCreating);
    S.StartVerticalLay();
@@ -2084,6 +2075,23 @@ wxString Meter::Key(const wxString & key) const
 
    return wxT("/Meter/Output/") + key;
 }
+
+bool Meter::s_AcceptsFocus{ false };
+
+auto Meter::TemporarilyAllowFocus() -> TempAllowFocus {
+   s_AcceptsFocus = true;
+   return TempAllowFocus{ &s_AcceptsFocus };
+}
+
+// This compensates for a but in wxWidgets 3.0.2 for mac:
+// Couldn't set focus from keyboard when AcceptsFocus returns false;
+// this bypasses that limitation
+void Meter::SetFocusFromKbd()
+{
+   auto temp = TemporarilyAllowFocus();
+   SetFocus();
+}
+
 
 #if wxUSE_ACCESSIBILITY
 

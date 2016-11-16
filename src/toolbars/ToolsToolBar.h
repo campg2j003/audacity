@@ -70,7 +70,7 @@ class ToolsToolBar final : public ToolBar {
 
  private:
 
-   void RegenerateToolsTooltips();
+   void RegenerateTooltips() override;
    wxImage *MakeToolImage(wxImage *tool, wxImage *mask, int style);
    AButton *MakeTool(teBmps eTool, int id, const wxChar *label);
 
@@ -82,8 +82,8 @@ class ToolsToolBar final : public ToolBar {
 
  public:
 
-   DECLARE_CLASS(ToolsToolBar);
-   DECLARE_EVENT_TABLE();
+   DECLARE_CLASS(ToolsToolBar)
+   DECLARE_EVENT_TABLE()
 };
 
 #endif

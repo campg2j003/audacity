@@ -42,7 +42,7 @@ of the BlockFile system.
 
 #include "FileDialog.h"
 
-class BenchmarkDialog final : public wxDialog
+class BenchmarkDialog final : public wxDialogWrapper
 {
 public:
    // constructors and destructors
@@ -117,7 +117,7 @@ enum {
    RandSeedID
 };
 
-BEGIN_EVENT_TABLE(BenchmarkDialog,wxDialog)
+BEGIN_EVENT_TABLE(BenchmarkDialog, wxDialogWrapper)
    EVT_BUTTON( RunID,   BenchmarkDialog::OnRun )
    EVT_BUTTON( BSaveID,  BenchmarkDialog::OnSave )
    EVT_BUTTON( ClearID, BenchmarkDialog::OnClear )
@@ -125,7 +125,7 @@ BEGIN_EVENT_TABLE(BenchmarkDialog,wxDialog)
 END_EVENT_TABLE()
 
 BenchmarkDialog::BenchmarkDialog(wxWindow *parent):
-      wxDialog( parent, 0, wxT("Benchmark"),
+      wxDialogWrapper( parent, 0, wxT("Benchmark"),
                 wxDefaultPosition, wxDefaultSize,
                 wxDEFAULT_DIALOG_STYLE |
                 wxRESIZE_BORDER)
@@ -335,7 +335,10 @@ void BenchmarkDialog::OnRun( wxCommandEvent & WXUNUSED(event))
    gPrefs->Flush();
 
    // Rememebr the old blocksize, so that we can restore it later.
-   int oldBlockSize = Sequence::GetMaxDiskBlockSize();
+   auto oldBlockSize = Sequence::GetMaxDiskBlockSize();
+   const auto cleanup = finally([=]
+      { Sequence::SetMaxDiskBlockSize(oldBlockSize); }
+   );
    Sequence::SetMaxDiskBlockSize(blockSize * 1024);
 
    wxBusyCursor busy;
@@ -343,8 +346,8 @@ void BenchmarkDialog::OnRun( wxCommandEvent & WXUNUSED(event))
    HoldPrint(true);
 
    ZoomInfo zoomInfo(0.0, ZoomInfo::GetDefaultZoom());
-   DirManager *d = new DirManager();
-   const auto t = TrackFactory{ d, &zoomInfo }.NewWaveTrack(int16Sample);
+   auto dd = std::make_shared<DirManager>();
+   const auto t = TrackFactory{ dd, &zoomInfo }.NewWaveTrack(int16Sample);
 
    t->SetRate(1);
 
@@ -400,9 +403,9 @@ void BenchmarkDialog::OnRun( wxCommandEvent & WXUNUSED(event))
    // as we're about to do).
    t->GetEndTime();
 
-   if (t->GetClipByIndex(0)->GetSequence()->GetNumSamples() != (sampleCount)nChunks * chunkSize) {
+   if (t->GetClipByIndex(0)->GetSequence()->GetNumSamples() != nChunks * chunkSize) {
       Printf(wxT("Expected len %d, track len %lld.\n"), nChunks * chunkSize,
-             (long long) t->GetClipByIndex(0)->GetSequence()->GetNumSamples());
+             t->GetClipByIndex(0)->GetSequence()->GetNumSamples().as_long_long());
       goto fail;
    }
 
@@ -423,7 +426,7 @@ void BenchmarkDialog::OnRun( wxCommandEvent & WXUNUSED(event))
          Printf(wxT("Cut (%d, %d) failed.\n"), (x0 * chunkSize),
                 (x0 + xlen) * chunkSize);
          Printf(wxT("Expected len %d, track len %lld.\n"), nChunks * chunkSize,
-                (long long) t->GetClipByIndex(0)->GetSequence()->GetNumSamples());
+                t->GetClipByIndex(0)->GetSequence()->GetNumSamples().as_long_long());
          goto fail;
       }
 
@@ -437,10 +440,10 @@ void BenchmarkDialog::OnRun( wxCommandEvent & WXUNUSED(event))
          goto fail;
       }
 
-      if (t->GetClipByIndex(0)->GetSequence()->GetNumSamples() != (sampleCount) nChunks * chunkSize) {
+      if (t->GetClipByIndex(0)->GetSequence()->GetNumSamples() != nChunks * chunkSize) {
          Printf(wxT("Trial %d\n"), z);
          Printf(wxT("Expected len %d, track len %lld.\n"), nChunks * chunkSize,
-                (long long) t->GetClipByIndex(0)->GetSequence()->GetNumSamples());
+                t->GetClipByIndex(0)->GetSequence()->GetNumSamples().as_long_long());
          goto fail;
       }
       // Copy
@@ -533,9 +536,8 @@ void BenchmarkDialog::OnRun( wxCommandEvent & WXUNUSED(event))
    delete[]small2;
    delete[]block;
 
-   d->Deref();
+   dd.reset();
 
-   Sequence::SetMaxDiskBlockSize(oldBlockSize);
    Printf(wxT("Benchmark completed successfully.\n"));
    HoldPrint(false);
 

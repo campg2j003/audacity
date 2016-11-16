@@ -64,15 +64,15 @@ FactoryPresets[] =
 {
    //                         Room  Pre            Hf       Tone Tone  Wet   Dry   Stereo Wet
    // Name                    Size, Delay, Reverb, Damping, Low, High, Gain, Gain, Width, Only
-   XO("Vocal I" ),          { 70,   20,    40,     99,      100, 50,   -12,  0,    70,    false },
-   XO("Vocal II"),          { 50,   0,     50,     99,      50,  100,  -1,   -1,   70,    false },
-   XO("Bathroom"),          { 16,   8,     80,     0,       0,   100,  -6,   0,    100,   false },
-   XO("Small Room Bright"), { 30,   10,    50,     50,      50,  100,  -1,   -1,   100,   false },
-   XO("Small Room Dark"),   { 30,   10,    50,     50,      100, 0,    -1,   -1,   100,   false },
-   XO("Medium Room"),       { 75,   10,    40,     50,      100, 70,   -1,   -1,   70,    false },
-   XO("Large Room"),        { 85,   10,    40,     50,      100, 80,    0,   -6,   90,    false },
-   XO("Church Hall"),       { 90,   32,    60,     50,      100, 50,    0,   -12,  100,   false },
-   XO("Cathedral"),         { 90,   16,    90,     50,      100, 0,     0,   -20,  100,   false },
+   { XO("Vocal I" ),          { 70,   20,    40,     99,      100, 50,   -12,  0,    70,    false } },
+   { XO("Vocal II"),          { 50,   0,     50,     99,      50,  100,  -1,   -1,   70,    false } },
+   { XO("Bathroom"),          { 16,   8,     80,     0,       0,   100,  -6,   0,    100,   false } },
+   { XO("Small Room Bright"), { 30,   10,    50,     50,      50,  100,  -1,   -1,   100,   false } },
+   { XO("Small Room Dark"),   { 30,   10,    50,     50,      100, 0,    -1,   -1,   100,   false } },
+   { XO("Medium Room"),       { 75,   10,    40,     50,      100, 70,   -1,   -1,   70,    false } },
+   { XO("Large Room"),        { 85,   10,    40,     50,      100, 80,    0,   -6,   90,    false } },
+   { XO("Church Hall"),       { 90,   32,    60,     50,      100, 50,    0,   -12,  100,   false } },
+   { XO("Cathedral"),         { 90,   16,    90,     50,      100, 0,     0,   -20,  100,   false } },
 };
 
 struct Reverb_priv_t
@@ -149,17 +149,17 @@ EffectType EffectReverb::GetType()
 
 // EffectClientInterface implementation
 
-int EffectReverb::GetAudioInCount()
+unsigned EffectReverb::GetAudioInCount()
 {
    return mParams.mStereoWidth ? 2 : 1;
 }
 
-int EffectReverb::GetAudioOutCount()
+unsigned EffectReverb::GetAudioOutCount()
 {
    return mParams.mStereoWidth ? 2 : 1;
 }
 
-#define BLOCK 16384
+static size_t BLOCK = 16384;
 
 bool EffectReverb::ProcessInitialize(sampleCount WXUNUSED(totalLen), ChannelNames chanMap)
 {
@@ -204,7 +204,7 @@ bool EffectReverb::ProcessFinalize()
    return true;
 }
 
-sampleCount EffectReverb::ProcessBlock(float **inBlock, float **outBlock, sampleCount blockLen)
+size_t EffectReverb::ProcessBlock(float **inBlock, float **outBlock, size_t blockLen)
 {
    float *ichans[2] = {NULL, NULL};
    float *ochans[2] = {NULL, NULL};
@@ -217,11 +217,11 @@ sampleCount EffectReverb::ProcessBlock(float **inBlock, float **outBlock, sample
    
    float const dryMult = mParams.mWetOnly ? 0 : dB_to_linear(mParams.mDryGain);
 
-   sampleCount remaining = blockLen;
+   auto remaining = blockLen;
 
    while (remaining)
    {
-      sampleCount len = wxMin(remaining, BLOCK);
+      auto len = std::min(remaining, decltype(remaining)(BLOCK));
       for (int c = 0; c < mNumChans; c++)
       {
          // Write the input samples to the reverb fifo.  Returned value is the address of the
@@ -232,7 +232,7 @@ sampleCount EffectReverb::ProcessBlock(float **inBlock, float **outBlock, sample
 
       if (mNumChans == 2)
       {
-         for (sampleCount i = 0; i < len; i++)
+         for (decltype(len) i = 0; i < len; i++)
          {
             for (int w = 0; w < 2; w++)
             {
@@ -245,7 +245,7 @@ sampleCount EffectReverb::ProcessBlock(float **inBlock, float **outBlock, sample
       }
       else
       {
-         for (sampleCount i = 0; i < len; i++)
+         for (decltype(len) i = 0; i < len; i++)
          {
             ochans[0][i] = dryMult * 
                            mP[0].dry[i] +
@@ -422,15 +422,15 @@ void EffectReverb::PopulateOrExchange(ShuttleGui & S)
       m ## n ## S = S.Id(ID_ ## n). \
          AddSlider(wxT(""), DEF_ ## n, MAX_ ## n, MIN_ ## n);
 
-      SpinSlider(RoomSize,       _("&Room Size (%):"));
-      SpinSlider(PreDelay,       _("&Pre-delay (ms):"));
-      SpinSlider(Reverberance,   _("Rever&berance (%):"));
-      SpinSlider(HfDamping,      _("Da&mping (%):"));
-      SpinSlider(ToneLow,        _("Tone &Low (%):"));
-      SpinSlider(ToneHigh,       _("Tone &High (%):"));
-      SpinSlider(WetGain,        _("Wet &Gain (dB):"));
-      SpinSlider(DryGain,        _("Dr&y Gain (dB):"));
-      SpinSlider(StereoWidth,    _("Stereo Wid&th (%):"));
+      SpinSlider(RoomSize,       _("&Room Size (%):"))
+      SpinSlider(PreDelay,       _("&Pre-delay (ms):"))
+      SpinSlider(Reverberance,   _("Rever&berance (%):"))
+      SpinSlider(HfDamping,      _("Da&mping (%):"))
+      SpinSlider(ToneLow,        _("Tone &Low (%):"))
+      SpinSlider(ToneHigh,       _("Tone &High (%):"))
+      SpinSlider(WetGain,        _("Wet &Gain (dB):"))
+      SpinSlider(DryGain,        _("Dr&y Gain (dB):"))
+      SpinSlider(StereoWidth,    _("Stereo Wid&th (%):"))
 
 #undef SpinSlider
 
@@ -507,15 +507,15 @@ bool EffectReverb::TransferDataFromWindow()
       mProcessingEvent = false; \
    }
 
-SpinSliderHandlers(RoomSize);
-SpinSliderHandlers(PreDelay);
-SpinSliderHandlers(Reverberance);
-SpinSliderHandlers(HfDamping);
-SpinSliderHandlers(ToneLow);
-SpinSliderHandlers(ToneHigh);
-SpinSliderHandlers(WetGain);
-SpinSliderHandlers(DryGain);
-SpinSliderHandlers(StereoWidth);
+SpinSliderHandlers(RoomSize)
+SpinSliderHandlers(PreDelay)
+SpinSliderHandlers(Reverberance)
+SpinSliderHandlers(HfDamping)
+SpinSliderHandlers(ToneLow)
+SpinSliderHandlers(ToneHigh)
+SpinSliderHandlers(WetGain)
+SpinSliderHandlers(DryGain)
+SpinSliderHandlers(StereoWidth)
 
 #undef SpinSliderHandlers
 

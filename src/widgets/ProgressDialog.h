@@ -20,13 +20,15 @@
 
 #include "../Audacity.h"
 
+#include "../MemoryX.h"
 #include <wx/defs.h>
-#include <wx/dialog.h>
 #include <wx/evtloop.h>
 #include <wx/gauge.h>
 #include <wx/stattext.h>
 #include <wx/utils.h>
 #include <wx/msgdlg.h>
+
+#include "wxPanelWrapper.h"
 
 enum
 {
@@ -51,7 +53,7 @@ enum ProgressDialogFlags
 /// ProgressDialog Class
 ////////////////////////////////////////////////////////////
 
-class AUDACITY_DLL_API ProgressDialog /* not final */ : public wxDialog
+class AUDACITY_DLL_API ProgressDialog /* not final */ : public wxDialogWrapper
 {
 public:
    ProgressDialog();
@@ -75,6 +77,9 @@ public:
    int Update(wxLongLong_t current, wxLongLong_t total, const wxString & message = wxEmptyString);
    int Update(int current, int total, const wxString & message = wxEmptyString);
    void SetMessage(const wxString & message);
+
+   // 'ETB' character to indicate a new column in the message text.
+   static const wxChar ColoumnSplitMarker = (char)23;
 
 protected:
    wxWindow *mHadFocus;
@@ -108,17 +113,19 @@ private:
                       const wxString & sTitle,
                       int iButtonID = -1);
 
+   void AddMessageAsColumn(wxBoxSizer * pSizer, const wxString & sText, bool bFirstColumn);
+
 private:
    // This guarantees we have an active event loop...possible during OnInit()
    wxEventLoopGuarantor mLoop;
 
-   wxWindowDisabler *mDisable;
+   std::unique_ptr<wxWindowDisabler> mDisable;
 
    wxStaticText *mMessage;
    int mLastW;
    int mLastH;
 
-   DECLARE_EVENT_TABLE();
+   DECLARE_EVENT_TABLE()
 };
 
 class AUDACITY_DLL_API TimerProgressDialog final : public ProgressDialog

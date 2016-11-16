@@ -80,7 +80,7 @@ void WaveformPrefs::PopulateOrExchange(ShuttleGui & S)
       mDefaultsCheckbox = 0;
       if (mWt) {
          /* i18n-hint: use is a verb */
-         mDefaultsCheckbox = S.Id(ID_DEFAULTS).TieCheckBox(_("Use Preferences"), mDefaulted);
+         mDefaultsCheckbox = S.Id(ID_DEFAULTS).TieCheckBox(_("&Use Preferences"), mDefaulted);
       }
 
       S.StartStatic(_("Display"));
@@ -136,8 +136,11 @@ bool WaveformPrefs::Apply()
 {
    const bool isOpenPage = this->IsShown();
 
-   WaveTrack *const partner =
-      mWt ? static_cast<WaveTrack*>(mWt->GetLink()) : 0;
+   const auto partner =
+      mWt ?
+            // Assume linked track is wave or null
+            static_cast<WaveTrack*>(mWt->GetLink())
+          : nullptr;
 
    ShuttleGui S(this, eIsGettingFromDialog);
    PopulateOrExchange(S);
@@ -147,9 +150,9 @@ bool WaveformPrefs::Apply()
 
    if (mWt) {
       if (mDefaulted) {
-         mWt->SetWaveformSettings(NULL);
+         mWt->SetWaveformSettings({});
          if (partner)
-            partner->SetWaveformSettings(NULL);
+            partner->SetWaveformSettings({});
       }
       else {
          WaveformSettings *pSettings =

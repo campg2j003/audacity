@@ -61,7 +61,7 @@ private:
    bool ProcessOne(int count, WaveTrack * track,
                    sampleCount start, sampleCount len);
 
-   bool RemoveClicks(sampleCount len, float *buffer);
+   bool RemoveClicks(int len, float *buffer);
 
    void OnWidthText(wxCommandEvent & evt);
    void OnThreshText(wxCommandEvent & evt);
@@ -72,7 +72,7 @@ private:
    Envelope *mEnvelope;
 
    bool mbDidSomething; // This effect usually does nothing on real-world data.
-   int windowSize;
+   size_t windowSize;
    int mThresholdLevel;
    int mClickWidth;
    int sep;
@@ -82,7 +82,7 @@ private:
    wxTextCtrl *mWidthT;
    wxTextCtrl *mThreshT;
 
-   DECLARE_EVENT_TABLE();
+   DECLARE_EVENT_TABLE()
 };
 
 #endif

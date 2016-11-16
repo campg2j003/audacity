@@ -92,7 +92,7 @@ static void WriteExportFormatPref(int format)
 #define ID_HEADER_CHOICE           7102
 #define ID_ENCODING_CHOICE         7103
 
-class ExportPCMOptions final : public wxPanel
+class ExportPCMOptions final : public wxPanelWrapper
 {
 public:
 
@@ -123,12 +123,12 @@ private:
    DECLARE_EVENT_TABLE()
 };
 
-BEGIN_EVENT_TABLE(ExportPCMOptions, wxPanel)
+BEGIN_EVENT_TABLE(ExportPCMOptions, wxPanelWrapper)
    EVT_CHOICE(ID_HEADER_CHOICE, ExportPCMOptions::OnHeaderChoice)
 END_EVENT_TABLE()
 
 ExportPCMOptions::ExportPCMOptions(wxWindow *parent, int selformat)
-:  wxPanel(parent, wxID_ANY)
+:  wxPanelWrapper(parent, wxID_ANY)
 {
    int format;
 
@@ -314,7 +314,7 @@ public:
 
    wxWindow *OptionsCreate(wxWindow *parent, int format);
    int Export(AudacityProject *project,
-               int channels,
+               unsigned channels,
                const wxString &fName,
                bool selectedOnly,
                double t0,
@@ -351,7 +351,8 @@ ExportPCM::ExportPCM()
       format = AddFormat() - 1;
 
       si.format = kFormats[i].format;
-      for (si.channels = 1; sf_format_check(&si); si.channels++){};
+      for (si.channels = 1; sf_format_check(&si); si.channels++)
+         ;
       wxString ext = sf_header_extension(si.format);
 
       SetFormat(kFormats[i].name, format);
@@ -384,7 +385,7 @@ ExportPCM::ExportPCM()
  * file type, or giving the user full control over libsndfile.
  */
 int ExportPCM::Export(AudacityProject *project,
-                       int numChannels,
+                       unsigned numChannels,
                        const wxString &fName,
                        bool selectionOnly,
                        double t0,
@@ -413,7 +414,7 @@ int ExportPCM::Export(AudacityProject *project,
 
       wxString     formatStr;
       SF_INFO      info;
-      int          err;
+      //int          err;
 
       //This whole operation should not occur while a file is being loaded on OD,
       //(we are worried about reading from a file being written to,) so we block.
@@ -476,6 +477,7 @@ int ExportPCM::Export(AudacityProject *project,
       const WaveTrackConstArray waveTracks =
       tracks->GetWaveTrackConstArray(selectionOnly, false);
       {
+         wxASSERT(info.channels >= 0);
          auto mixer = CreateMixer(waveTracks,
                                   tracks->GetTimeTrack(),
                                   t0, t1,
@@ -490,8 +492,8 @@ int ExportPCM::Export(AudacityProject *project,
                                                   formatStr.c_str()));
 
          while (updateResult == eProgressSuccess) {
-            sampleCount samplesWritten;
-            sampleCount numSamples = mixer->Process(maxBlockLen);
+            sf_count_t samplesWritten;
+            auto numSamples = mixer->Process(maxBlockLen);
 
             if (numSamples == 0)
                break;
@@ -815,6 +817,7 @@ void ExportPCM::AddID3Chunk(wxString fName, const Tags *tags, int sf_format)
    id3_tag_delete(tp);
 
    wxFFile f(fName, wxT("r+b"));
+   // FIXME: TRAP_ERR wxFFILE ops in Export PCM ID3 could fail.
    if (f.IsOpened()) {
       wxUint32 sz;
 

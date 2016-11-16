@@ -40,12 +40,18 @@ struct MenuBarListEntry
 
 struct SubMenuListEntry
 {
-   SubMenuListEntry(const wxString &name_, wxMenu *menu_)
-      : name(name_), menu(menu_)
+   SubMenuListEntry(const wxString &name_, std::unique_ptr<wxMenu> &&menu_)
+      : name(name_), menu( std::move(menu_) )
    {}
 
+   SubMenuListEntry(SubMenuListEntry &&that)
+      : name(std::move(that.name))
+      , menu(std::move(that.menu))
+   {
+   }
+
    wxString name;
-   wxMenu *menu;
+   std::unique_ptr<wxMenu> menu;
 };
 
 struct CommandListEntry
@@ -71,7 +77,9 @@ struct CommandListEntry
 };
 
 using MenuBarList = std::vector < MenuBarListEntry >;
-using SubMenuList = std::vector < SubMenuListEntry >;
+
+// to do: remove the extra indirection when Mac compiler moves to newer version
+using SubMenuList = std::vector < movable_ptr<SubMenuListEntry> >;
 
 // This is an array of pointers, not structures, because the hash maps also point to them,
 // so we don't want the structures to relocate with vector operations.
@@ -93,8 +101,8 @@ class AUDACITY_DLL_API CommandManager final : public XMLTagHandler
    CommandManager();
    virtual ~CommandManager();
 
-   CommandManager(const CommandManager&) = delete;
-   CommandManager &operator= (const CommandManager&) = delete;
+   CommandManager(const CommandManager&) PROHIBITED;
+   CommandManager &operator= (const CommandManager&) PROHIBITED;
 
    void PurgeData();
 
@@ -104,14 +112,13 @@ class AUDACITY_DLL_API CommandManager final : public XMLTagHandler
 
    std::unique_ptr<wxMenuBar> AddMenuBar(const wxString & sMenu);
 
+   // You may either called SetCurrentMenu later followed by ClearCurrentMenu,
+   // or else BeginMenu followed by EndMenu.  Don't mix them.
    void BeginMenu(const wxString & tName);
    void EndMenu();
 
    wxMenu* BeginSubMenu(const wxString & tName);
    void EndSubMenu();
-   void SetToMenu( wxMenu * menu ){
-      mCurrentMenu = menu;
-   };
 
    void InsertItem(const wxString & name,
                    const wxString & label,
@@ -193,6 +200,11 @@ class AUDACITY_DLL_API CommandManager final : public XMLTagHandler
    void Enable(const wxString &name, bool enabled);
    void Check(const wxString &name, bool checked);
    void Modify(const wxString &name, const wxString &newLabel);
+
+   // You may either called SetCurrentMenu later followed by ClearCurrentMenu,
+   // or else BeginMenu followed by EndMenu.  Don't mix them.
+   void SetCurrentMenu(wxMenu * menu);
+   void ClearCurrentMenu();
 
    //
    // Modifying accelerators
@@ -311,7 +323,8 @@ private:
    bool mbSeparatorAllowed; // false at the start of a menu and immediately after a separator.
 
    wxString mCurrentMenuName;
-   wxMenu * mCurrentMenu;
+   std::unique_ptr<wxMenu> uCurrentMenu;
+   wxMenu *mCurrentMenu {};
 
    CommandFlag mDefaultFlags;
    CommandMask mDefaultMask;

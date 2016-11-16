@@ -46,13 +46,12 @@ out.
 #include "BlockFile.h"
 
 #include <float.h>
-#include <math.h>
+#include <cmath>
 
 #include <wx/utils.h>
 #include <wx/filefn.h>
 #include <wx/ffile.h>
 #include <wx/log.h>
-#include <wx/math.h>
 
 #include "Internat.h"
 #include "MemoryX.h"
@@ -71,7 +70,7 @@ out.
 static const int headerTagLen = 20;
 static char headerTag[headerTagLen + 1] = "AudacityBlockFile112";
 
-SummaryInfo::SummaryInfo(sampleCount samples)
+SummaryInfo::SummaryInfo(size_t samples)
 {
    format = floatSample;
 
@@ -99,9 +98,8 @@ ArrayOf<char> BlockFile::fullSummary;
 ///                 will store at least the summary data here.
 ///
 /// @param samples  The number of samples this BlockFile contains.
-BlockFile::BlockFile(wxFileNameWrapper &&fileName, sampleCount samples):
+BlockFile::BlockFile(wxFileNameWrapper &&fileName, size_t samples):
    mLockCount(0),
-   mRefCount(1),
    mFileName(std::move(fileName)),
    mLen(samples),
    mSummaryInfo(samples)
@@ -109,10 +107,15 @@ BlockFile::BlockFile(wxFileNameWrapper &&fileName, sampleCount samples):
    mSilentLog=FALSE;
 }
 
+// static
+unsigned long BlockFile::gBlockFileDestructionCount { 0 };
+
 BlockFile::~BlockFile()
 {
    if (!IsLocked() && mFileName.HasName())
       wxRemoveFile(mFileName.GetFullPath());
+
+   ++gBlockFileDestructionCount;
 }
 
 /// Returns the file name of the disk file associated with this
@@ -160,28 +163,6 @@ bool BlockFile::IsLocked()
    return mLockCount > 0;
 }
 
-/// Increases the reference count of this block by one.  Only
-/// DirManager should call this method.
-void BlockFile::Ref() const
-{
-   mRefCount++;
-   BLOCKFILE_DEBUG_OUTPUT("Ref", mRefCount);
-}
-
-/// Decreases the reference count of this block by one.  If this
-/// causes the count to become zero, deletes the associated disk
-/// file and deletes this object
-bool BlockFile::Deref() const
-{
-   mRefCount--;
-   BLOCKFILE_DEBUG_OUTPUT("Deref", mRefCount);
-   if (mRefCount <= 0) {
-      delete this;
-      return true;
-   } else
-      return false;
-}
-
 /// Get a buffer containing a summary block describing this sample
 /// data.  This must be called by derived classes when they
 /// are constructed, to allow them to construct their summary data,
@@ -196,7 +177,7 @@ bool BlockFile::Deref() const
 /// @param buffer A buffer containing the sample data to be analyzed
 /// @param len    The length of the sample data
 /// @param format The format of the sample data.
-void *BlockFile::CalcSummary(samplePtr buffer, sampleCount len,
+void *BlockFile::CalcSummary(samplePtr buffer, size_t len,
                              sampleFormat format, ArrayOf<char> &cleanup)
 {
    // Caller has nothing to deallocate
@@ -213,23 +194,37 @@ void *BlockFile::CalcSummary(samplePtr buffer, sampleCount len,
    CopySamples(buffer, format,
                (samplePtr)fbuffer, floatSample, len);
 
-   sampleCount sumLen;
-   sampleCount i, j, jcount;
+   CalcSummaryFromBuffer(fbuffer, len, summary256, summary64K);
+
+   delete[] fbuffer;
+
+   return fullSummary.get();
+}
+
+void BlockFile::CalcSummaryFromBuffer(const float *fbuffer, size_t len,
+                                      float *summary256, float *summary64K)
+{
+   decltype(len) sumLen;
 
    float min, max;
    float sumsq;
+   double totalSquares = 0.0;
+   double fraction { 0.0 };
 
    // Recalc 256 summaries
    sumLen = (len + 255) / 256;
+   int summaries = 256;
 
-   for (i = 0; i < sumLen; i++) {
+   for (decltype(sumLen) i = 0; i < sumLen; i++) {
       min = fbuffer[i * 256];
       max = fbuffer[i * 256];
       sumsq = ((float)min) * ((float)min);
-      jcount = 256;
-      if (i * 256 + jcount > len)
+      decltype(len) jcount = 256;
+      if (jcount > len - i * 256) {
          jcount = len - i * 256;
-      for (j = 1; j < jcount; j++) {
+         fraction = 1.0 - (jcount / 256.0);
+      }
+      for (decltype(jcount) j = 1; j < jcount; j++) {
          float f1 = fbuffer[i * 256 + j];
          sumsq += ((float)f1) * ((float)f1);
          if (f1 < min)
@@ -238,28 +233,34 @@ void *BlockFile::CalcSummary(samplePtr buffer, sampleCount len,
             max = f1;
       }
 
+      totalSquares += sumsq;
       float rms = (float)sqrt(sumsq / jcount);
 
       summary256[i * 3] = min;
       summary256[i * 3 + 1] = max;
-      summary256[i * 3 + 2] = rms;
+      summary256[i * 3 + 2] = rms;  // The rms is correct, but this may be for less than 256 samples in last loop.
    }
-   for (i = sumLen; i < mSummaryInfo.frames256; i++) {
+   for (auto i = sumLen; i < mSummaryInfo.frames256; i++) {
       // filling in the remaining bits with non-harming/contributing values
+      // rms values are not "non-harming", so keep  count of them:
+      summaries--;
       summary256[i * 3] = FLT_MAX;  // min
       summary256[i * 3 + 1] = -FLT_MAX;   // max
       summary256[i * 3 + 2] = 0.0f; // rms
    }
 
+   // Calculate now while we can do it accurately
+   mRMS = sqrt(totalSquares/len);
+
    // Recalc 64K summaries
    sumLen = (len + 65535) / 65536;
 
-   for (i = 0; i < sumLen; i++) {
+   for (decltype(sumLen) i = 0; i < sumLen; i++) {
       min = summary256[3 * i * 256];
       max = summary256[3 * i * 256 + 1];
       sumsq = (float)summary256[3 * i * 256 + 2];
       sumsq *= sumsq;
-      for (j = 1; j < 256; j++) {   // we can overflow the useful summary256 values here, but have put non-harmful values in them
+      for (decltype(len) j = 1; j < 256; j++) {   // we can overflow the useful summary256 values here, but have put non-harmful values in them
          if (summary256[3 * (i * 256 + j)] < min)
             min = summary256[3 * (i * 256 + j)];
          if (summary256[3 * (i * 256 + j) + 1] > max)
@@ -268,40 +269,33 @@ void *BlockFile::CalcSummary(samplePtr buffer, sampleCount len,
          sumsq += r1*r1;
       }
 
-      float rms = (float)sqrt(sumsq / 256);  // the '256' is not quite right at the edges as not all summary256 entries will be filled with useful values
+      double denom = (i < sumLen - 1) ? 256.0 : summaries - fraction;
+      float rms = (float)sqrt(sumsq / denom);
 
       summary64K[i * 3] = min;
       summary64K[i * 3 + 1] = max;
       summary64K[i * 3 + 2] = rms;
    }
-   for (i = sumLen; i < mSummaryInfo.frames64K; i++) {
+   for (auto i = sumLen; i < mSummaryInfo.frames64K; i++) {
+      wxASSERT_MSG(false, wxT("Out of data for mSummaryInfo"));   // Do we ever get here?
       summary64K[i * 3] = 0.0f;  // probably should be FLT_MAX, need a test case
       summary64K[i * 3 + 1] = 0.0f; // probably should be -FLT_MAX, need a test case
-      summary64K[i * 3 + 2] = 0.0f;
+      summary64K[i * 3 + 2] = 0.0f; // just padding
    }
 
-   // Recalc block-level summary
+   // Recalc block-level summary (mRMS already calculated)
    min = summary64K[0];
    max = summary64K[1];
-   sumsq = (float)summary64K[2];
-   sumsq *= sumsq;
 
-   for (i = 1; i < sumLen; i++) {
+   for (decltype(sumLen) i = 1; i < sumLen; i++) {
       if (summary64K[3*i] < min)
          min = summary64K[3*i];
       if (summary64K[3*i+1] > max)
          max = summary64K[3*i+1];
-      float r1 = (float)summary64K[3*i+2];
-      sumsq += (r1*r1);
    }
 
    mMin = min;
    mMax = max;
-   mRMS = sqrt(sumsq / sumLen);
-
-   delete[] fbuffer;
-
-   return fullSummary.get();
 }
 
 static void ComputeMinMax256(float *summary256,
@@ -322,7 +316,7 @@ static void ComputeMinMax256(float *summary256,
          max = summary256[3*i+1];
       else if (!(summary256[3*i+1] <= max))
          bad++;
-      if (wxIsNaN(summary256[3*i+2]))
+      if (std::isnan(summary256[3*i+2]))
          bad++;
       if (summary256[3*i+2] < -1 || summary256[3*i+2] > 1)
          bad++;
@@ -381,7 +375,7 @@ void BlockFile::FixSummary(void *data)
 ///                should be stored
 /// @param *outRMS A pointer to where the maximum RMS value for this
 ///                region should be stored.
-void BlockFile::GetMinMax(sampleCount start, sampleCount len,
+void BlockFile::GetMinMax(size_t start, size_t len,
                   float *outMin, float *outMax, float *outRMS) const
 {
    // TODO: actually use summaries
@@ -392,7 +386,7 @@ void BlockFile::GetMinMax(sampleCount start, sampleCount len,
    float max = -FLT_MAX;
    float sumsq = 0;
 
-   for( int i = 0; i < len; i++ )
+   for( decltype(len) i = 0; i < len; i++ )
    {
       float sample = ((float*)blockData.ptr())[i];
 
@@ -435,15 +429,16 @@ void BlockFile::GetMinMax(float *outMin, float *outMax, float *outRMS) const
 /// @param start   The offset in 256-sample increments
 /// @param len     The number of 256-sample summary frames to read
 bool BlockFile::Read256(float *buffer,
-                        sampleCount start, sampleCount len)
+                        size_t start, size_t len)
 {
    wxASSERT(start >= 0);
 
    char *summary = new char[mSummaryInfo.totalSummaryBytes];
+   // FIXME: TRAP_ERR ReadSummary() could return fail.
    this->ReadSummary(summary);
 
-   if (start+len > mSummaryInfo.frames256)
-      len = mSummaryInfo.frames256 - start;
+   start = std::min( start, mSummaryInfo.frames256 );
+   len = std::min( len, mSummaryInfo.frames256 - start );
 
    CopySamples(summary + mSummaryInfo.offset256 + (start * mSummaryInfo.bytesPerFrame),
                mSummaryInfo.format,
@@ -451,8 +446,7 @@ bool BlockFile::Read256(float *buffer,
 
    if (mSummaryInfo.fields == 2) {
       // No RMS info
-      int i;
-      for(i=len-1; i>=0; i--) {
+      for(auto i = len; i--;) {
          buffer[3*i+2] = (fabs(buffer[2*i]) + fabs(buffer[2*i+1]))/4.0;
          buffer[3*i+1] = buffer[2*i+1];
          buffer[3*i] = buffer[2*i];
@@ -474,15 +468,16 @@ bool BlockFile::Read256(float *buffer,
 /// @param start   The offset in 64K-sample increments
 /// @param len     The number of 64K-sample summary frames to read
 bool BlockFile::Read64K(float *buffer,
-                        sampleCount start, sampleCount len)
+                        size_t start, size_t len)
 {
    wxASSERT(start >= 0);
 
    char *summary = new char[mSummaryInfo.totalSummaryBytes];
+   // FIXME: TRAP_ERR ReadSummary() could return fail.
    this->ReadSummary(summary);
 
-   if (start+len > mSummaryInfo.frames64K)
-      len = mSummaryInfo.frames64K - start;
+   start = std::min( start, mSummaryInfo.frames64K );
+   len = std::min( len, mSummaryInfo.frames64K - start );
 
    CopySamples(summary + mSummaryInfo.offset64K +
                (start * mSummaryInfo.bytesPerFrame),
@@ -491,8 +486,7 @@ bool BlockFile::Read64K(float *buffer,
 
    if (mSummaryInfo.fields == 2) {
       // No RMS info; make guess
-      int i;
-      for(i=len-1; i>=0; i--) {
+      for(auto i = len; i--;) {
          buffer[3*i+2] = (fabs(buffer[2*i]) + fabs(buffer[2*i+1]))/4.0;
          buffer[3*i+1] = buffer[2*i+1];
          buffer[3*i] = buffer[2*i];
@@ -526,7 +520,7 @@ bool BlockFile::Read64K(float *buffer,
 AliasBlockFile::AliasBlockFile(wxFileNameWrapper &&baseFileName,
                                wxFileNameWrapper &&aliasedFileName,
                                sampleCount aliasStart,
-                               sampleCount aliasLen, int aliasChannel):
+                               size_t aliasLen, int aliasChannel):
    BlockFile {
       (baseFileName.SetExt(wxT("auf")), std::move(baseFileName)),
       aliasLen
@@ -541,10 +535,10 @@ AliasBlockFile::AliasBlockFile(wxFileNameWrapper &&baseFileName,
 AliasBlockFile::AliasBlockFile(wxFileNameWrapper &&existingSummaryFileName,
                                wxFileNameWrapper &&aliasedFileName,
                                sampleCount aliasStart,
-                               sampleCount aliasLen,
+                               size_t aliasLen,
                                int aliasChannel,
                                float min, float max, float rms):
-   BlockFile(std::move(existingSummaryFileName), aliasLen),
+   BlockFile{ std::move(existingSummaryFileName), aliasLen },
    mAliasedFileName(std::move(aliasedFileName)),
    mAliasStart(aliasStart),
    mAliasChannel(aliasChannel)
@@ -637,7 +631,7 @@ void AliasBlockFile::ChangeAliasedFileName(wxFileNameWrapper &&newAliasedFile)
    mAliasedFileName = std::move(newAliasedFile);
 }
 
-wxLongLong AliasBlockFile::GetSpaceUsage() const
+auto AliasBlockFile::GetSpaceUsage() const -> DiskByteCount
 {
    wxFFile summaryFile(mFileName.GetFullPath());
    return summaryFile.Length();

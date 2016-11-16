@@ -25,22 +25,18 @@ effect that uses SoundTouch to do its processing (ChangeTempo
 #include "TimeWarper.h"
 #include "../NoteTrack.h"
 
-bool EffectSoundTouch::ProcessLabelTrack(Track *track)
+bool EffectSoundTouch::ProcessLabelTrack(LabelTrack *lt)
 {
-//   SetTimeWarper(new RegionTimeWarper(mCurT0, mCurT1,
- //           new LinearTimeWarper(mCurT0, mCurT0,
+//   SetTimeWarper(std::make_unique<RegionTimeWarper>(mCurT0, mCurT1,
+ //           std::make_unique<LinearTimeWarper>(mCurT0, mCurT0,
    //            mCurT1, mCurT0 + (mCurT1-mCurT0)*mFactor)));
-   LabelTrack *lt = (LabelTrack*)track;
-   if (lt == NULL) return false;
    lt->WarpLabels(*GetTimeWarper());
    return true;
 }
 
 #ifdef USE_MIDI
-bool EffectSoundTouch::ProcessNoteTrack(Track *track)
+bool EffectSoundTouch::ProcessNoteTrack(NoteTrack *nt)
 {
-   NoteTrack *nt = (NoteTrack *) track;
-   if (nt == NULL) return false;
    nt->WarpAndTransposeNotes(mCurT0, mCurT1, *GetTimeWarper(), mSemitones);
    return true;
 }
@@ -64,7 +60,7 @@ bool EffectSoundTouch::Process()
    this->CopyInputTracks(Track::All);
    bool bGoodResult = true;
 
-   TrackListIterator iter(mOutputTracks);
+   TrackListIterator iter(mOutputTracks.get());
    Track* t;
    mCurTrackNum = 0;
    m_maxNewLength = 0.0;
@@ -74,7 +70,7 @@ bool EffectSoundTouch::Process()
       if (t->GetKind() == Track::Label &&
             (t->GetSelected() || (mustSync && t->IsSyncLockSelected())) )
       {
-         if (!ProcessLabelTrack(t))
+         if (!ProcessLabelTrack(static_cast<LabelTrack*>(t)))
          {
             bGoodResult = false;
             break;
@@ -84,7 +80,7 @@ bool EffectSoundTouch::Process()
       else if (t->GetKind() == Track::Note &&
                (t->GetSelected() || (mustSync && t->IsSyncLockSelected())))
       {
-         if (!ProcessNoteTrack(t))
+         if (!ProcessNoteTrack(static_cast<NoteTrack*>(t)))
          {
             bGoodResult = false;
             break;
@@ -105,11 +101,11 @@ bool EffectSoundTouch::Process()
 
          // Process only if the right marker is to the right of the left marker
          if (mCurT1 > mCurT0) {
-            sampleCount start, end;
 
             if (leftTrack->GetLinked()) {
                double t;
-               WaveTrack* rightTrack = (WaveTrack*)(iter.Next());
+               // Assume linked track is wave
+               WaveTrack* rightTrack = static_cast<WaveTrack*>(iter.Next());
 
                //Adjust bounds by the right tracks markers
                t = rightTrack->GetStartTime();
@@ -120,8 +116,8 @@ bool EffectSoundTouch::Process()
                mCurT1 = wxMax(mCurT1, t);
 
                //Transform the marker timepoints to samples
-               start = leftTrack->TimeToLongSamples(mCurT0);
-               end = leftTrack->TimeToLongSamples(mCurT1);
+               auto start = leftTrack->TimeToLongSamples(mCurT0);
+               auto end = leftTrack->TimeToLongSamples(mCurT1);
 
                //Inform soundtouch there's 2 channels
                mSoundTouch->setChannels(2);
@@ -135,8 +131,8 @@ bool EffectSoundTouch::Process()
                mCurTrackNum++; // Increment for rightTrack, too.
             } else {
                //Transform the marker timepoints to samples
-               start = leftTrack->TimeToLongSamples(mCurT0);
-               end = leftTrack->TimeToLongSamples(mCurT1);
+               auto start = leftTrack->TimeToLongSamples(mCurT0);
+               auto end = leftTrack->TimeToLongSamples(mCurT1);
 
                //Inform soundtouch there's a single channel
                mSoundTouch->setChannels(1);
@@ -162,8 +158,7 @@ bool EffectSoundTouch::Process()
    if (bGoodResult)
       ReplaceProcessedTracks(bGoodResult);
 
-   delete mSoundTouch;
-   mSoundTouch = NULL;
+   mSoundTouch.reset();
 
 //   mT0 = mCurT0;
 //   mT1 = mCurT0 + m_maxNewLength; // Update selection.
@@ -176,8 +171,6 @@ bool EffectSoundTouch::Process()
 bool EffectSoundTouch::ProcessOne(WaveTrack *track,
                                   sampleCount start, sampleCount end)
 {
-   sampleCount s;
-
    mSoundTouch->setSampleRate((unsigned int)(track->GetRate()+0.5));
 
    auto outputTrack = mFactory->NewWaveTrack(track->GetSampleFormat(), track->GetRate());
@@ -185,7 +178,7 @@ bool EffectSoundTouch::ProcessOne(WaveTrack *track,
    //Get the length of the buffer (as double). len is
    //used simple to calculate a progress meter, so it is easier
    //to make it a double now than it is to do it later
-   double len = (double)(end - start);
+   auto len = (end - start).as_double();
 
    //Initiate a processing buffer.  This buffer will (most likely)
    //be shorter than the length of the track being processed.
@@ -193,14 +186,11 @@ bool EffectSoundTouch::ProcessOne(WaveTrack *track,
 
    //Go through the track one buffer at a time. s counts which
    //sample the current buffer starts at.
-   s = start;
+   auto s = start;
    while (s < end) {
       //Get a block of samples (smaller than the size of the buffer)
-      sampleCount block = track->GetBestBlockSize(s);
-
-      //Adjust the block size if it is the final block in the track
-      if (s + block > end)
-         block = end - s;
+      const auto block =
+         limitSampleBufferSize( track->GetBestBlockSize(s), end - s );
 
       //Get the samples from the track and put them in the buffer
       track->Get((samplePtr) buffer, floatSample, s, block);
@@ -221,7 +211,7 @@ bool EffectSoundTouch::ProcessOne(WaveTrack *track,
       s += block;
 
       //Update the Progress meter
-      if (TrackProgress(mCurTrackNum, (s - start) / len))
+      if (TrackProgress(mCurTrackNum, (s - start).as_double() / len))
          return false;
    }
 
@@ -266,14 +256,14 @@ bool EffectSoundTouch::ProcessStereo(WaveTrack* leftTrack, WaveTrack* rightTrack
    //Get the length of the buffer (as double). len is
    //used simple to calculate a progress meter, so it is easier
    //to make it a double now than it is to do it later
-   double len = (double)(end - start);
+   double len = (end - start).as_double();
 
    //Initiate a processing buffer.  This buffer will (most likely)
    //be shorter than the length of the track being processed.
    // Make soundTouchBuffer twice as big as MaxBlockSize for each channel,
    // because Soundtouch wants them interleaved, i.e., each
    // Soundtouch sample is left-right pair.
-   sampleCount maxBlockSize = leftTrack->GetMaxBlockSize();
+   auto maxBlockSize = leftTrack->GetMaxBlockSize();
    float* leftBuffer = new float[maxBlockSize];
    float* rightBuffer = new float[maxBlockSize];
    float* soundTouchBuffer = new float[maxBlockSize * 2];
@@ -281,21 +271,21 @@ bool EffectSoundTouch::ProcessStereo(WaveTrack* leftTrack, WaveTrack* rightTrack
    // Go through the track one stereo buffer at a time.
    // sourceSampleCount counts the sample at which the current buffer starts,
    // per channel.
-   sampleCount sourceSampleCount = start;
+   auto sourceSampleCount = start;
    while (sourceSampleCount < end) {
       //Get a block of samples (smaller than the size of the buffer)
-      sampleCount blockSize = leftTrack->GetBestBlockSize(sourceSampleCount);
-
       //Adjust the block size if it is the final block in the track
-      if (sourceSampleCount + blockSize > end)
-         blockSize = end - sourceSampleCount;
+      auto blockSize = limitSampleBufferSize(
+         leftTrack->GetBestBlockSize(sourceSampleCount),
+         end - sourceSampleCount
+      );
 
       // Get the samples from the tracks and put them in the buffers.
       leftTrack->Get((samplePtr)(leftBuffer), floatSample, sourceSampleCount, blockSize);
       rightTrack->Get((samplePtr)(rightBuffer), floatSample, sourceSampleCount, blockSize);
 
       // Interleave into soundTouchBuffer.
-      for (int index = 0; index < blockSize; index++) {
+      for (decltype(blockSize) index = 0; index < blockSize; index++) {
          soundTouchBuffer[index*2]       = leftBuffer[index];
          soundTouchBuffer[(index*2)+1]   = rightBuffer[index];
       }
@@ -314,7 +304,7 @@ bool EffectSoundTouch::ProcessStereo(WaveTrack* leftTrack, WaveTrack* rightTrack
       //Update the Progress meter
       // mCurTrackNum is left track. Include right track.
       int nWhichTrack = mCurTrackNum;
-      double frac = (sourceSampleCount - start) / len;
+      double frac = (sourceSampleCount - start).as_double() / len;
       if (frac < 0.5)
          frac *= 2.0; // Show twice as far for each track, because we're doing 2 at once.
       else

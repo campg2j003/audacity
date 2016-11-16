@@ -128,8 +128,8 @@ void MousePrefs::CreateList()
    AddItem(_("Shift-Drag"),       _("Zoom"),      _("Zoom out on a Range"));
    AddItem(_("Middle-Click"),     _("Zoom"),      _("Zoom default"));
 
-   AddItem(_("Left-Drag"),        _("Time-Shift"),_("Time shift clip or move up/down between tracks"));
-   AddItem(_("Shift-Left-Drag"),  _("Time-Shift"),_("Time shift all clips in track"));
+   AddItem(_("Left-Drag"),        _("Time-Shift"),_("Move clip left/right or between tracks"));
+   AddItem(_("Shift-Left-Drag"),  _("Time-Shift"),_("Move all clips in track left/right"));
    AddItem(CTRL + _("-Left-Drag"),_("Time-Shift"),_("Move clip up/down between tracks"));
 
    AddItem(_("Left-Drag"),
@@ -154,9 +154,10 @@ void MousePrefs::CreateList()
    // AddItem(_("ESC"),              _("Select"),    _("Toggle center snapping in spectrogram"), _("same as select tool"));
 #endif
 
-   AddItem(_("Wheel-Rotate"),      _("Any"),      _("Scroll up or down"));
-   AddItem(_("Shift-Wheel-Rotate"),_("Any"),      _("Scroll left or right"));
-   AddItem(CTRL + _("-Wheel-Rotate"), _("Any"),      _("Zoom in or out on Mouse Pointer"));
+   AddItem(_("Wheel-Rotate"),                _("Any"),   _("Scroll tracks up or down"));
+   AddItem(_("Shift-Wheel-Rotate"),          _("Any"),   _("Scroll waveform"));
+   AddItem(CTRL + _("-Wheel-Rotate"),        _("Any"),   _("Zoom waveform in or out"));
+   AddItem(CTRL + _("-Shift-Wheel-Rotate"),  _("Any"),   _("Vertical Scale Waveform (dB) range"));
 
    mList->SetColumnWidth(BlankColumn, 0);
    mList->SetColumnWidth(ToolColumn, wxLIST_AUTOSIZE);

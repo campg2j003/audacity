@@ -67,6 +67,7 @@
 
 #include "Prefs.h"
 
+std::unique_ptr<wxFileConfig> ugPrefs {};
 wxFileConfig *gPrefs = NULL;
 int gMenusDirty = 0;
 
@@ -101,6 +102,7 @@ static void CopyEntry(wxString path, wxConfigBase *src, wxConfigBase *dst, wxStr
    }
 }
 
+#if 0
 // Recursive routine to copy all groups and entries from one wxConfig object to another
 static void CopyEntriesRecursive(wxString path, wxConfigBase *src, wxConfigBase *dst)
 {
@@ -127,6 +129,7 @@ static void CopyEntriesRecursive(wxString path, wxConfigBase *src, wxConfigBase 
       groupKeepGoing = src->GetNextGroup(groupName, groupIndex);
    }
 }
+#endif
 
 void InitPreferences()
 {
@@ -134,9 +137,11 @@ void InitPreferences()
 
    wxFileName configFileName(FileNames::DataDir(), wxT("audacity.cfg"));
 
-   gPrefs = new wxFileConfig(appName, wxEmptyString,
-                             configFileName.GetFullPath(),
-                             wxEmptyString, wxCONFIG_USE_LOCAL_FILE);
+   ugPrefs = std::make_unique<wxFileConfig>
+      (appName, wxEmptyString,
+       configFileName.GetFullPath(),
+       wxEmptyString, wxCONFIG_USE_LOCAL_FILE);
+   gPrefs = ugPrefs.get();
 
    wxConfigBase::Set(gPrefs);
 
@@ -318,7 +323,7 @@ void FinishPreferences()
 {
    if (gPrefs) {
       wxConfigBase::Set(NULL);
-      delete gPrefs;
+      ugPrefs.reset();
       gPrefs = NULL;
    }
 }

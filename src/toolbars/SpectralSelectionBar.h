@@ -46,6 +46,8 @@ public:
    void SetBandwidthSelectionFormatName(const wxString & formatName);
    void SetListener(SpectralSelectionBarListener *l);
 
+   void RegenerateTooltips() override {};
+
 private:
 
    void ValuesToControls();
@@ -74,8 +76,8 @@ private:
 
 public:
 
-   DECLARE_CLASS(SpectralSelectionBar);
-   DECLARE_EVENT_TABLE();
+   DECLARE_CLASS(SpectralSelectionBar)
+   DECLARE_EVENT_TABLE()
 };
 
 #endif

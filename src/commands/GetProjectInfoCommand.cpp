@@ -28,7 +28,7 @@ wxString GetProjectInfoCommandType::BuildName()
 
 void GetProjectInfoCommandType::BuildSignature(CommandSignature &signature)
 {
-   OptionValidator *infoTypeValidator = new OptionValidator();
+   auto infoTypeValidator = make_movable<OptionValidator>();
    infoTypeValidator->AddOption(wxT("Name"));
    infoTypeValidator->AddOption(wxT("NumberOfTracks"));
    infoTypeValidator->AddOption(wxT("SelectedTracks"));
@@ -36,7 +36,7 @@ void GetProjectInfoCommandType::BuildSignature(CommandSignature &signature)
    infoTypeValidator->AddOption(wxT("SoloTracks"));
    infoTypeValidator->AddOption(wxT("FocusedTrackID")); // returns the Track ID number of the track in focus
 
-   signature.AddParameter(wxT("Type"), wxT("Name"), infoTypeValidator);
+   signature.AddParameter(wxT("Type"), wxT("Name"), std::move(infoTypeValidator));
 }
 
 CommandHolder GetProjectInfoCommandType::Create(std::unique_ptr<CommandOutputTarget> &&target)
@@ -149,22 +149,22 @@ void GetProjectInfoCommand::SendTracksInfo(TrackList *projTracks,
    Status(boolValueStr);
 }
 
-bool GetProjectInfoCommand::testSelected(Track * track) const
+bool GetProjectInfoCommand::testSelected(const Track * track) const
 {
    return track->GetSelected();
 }
 
-bool GetProjectInfoCommand::testLinked(Track * track) const
+bool GetProjectInfoCommand::testLinked(const Track * track) const
 {
    return track->GetLinked();
 }
 
-bool GetProjectInfoCommand::testSolo(Track * track) const
+bool GetProjectInfoCommand::testSolo(const Track * track) const
 {
    return track->GetSolo();
 }
 
-bool GetProjectInfoCommand::testMute(Track * track) const
+bool GetProjectInfoCommand::testMute(const Track * track) const
 {
    return track->GetMute();
 }

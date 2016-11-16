@@ -12,14 +12,15 @@
 #define __AUDACITY_TimeDialog__
 
 #include <wx/defs.h>
-#include <wx/dialog.h>
 #include <wx/event.h>
 #include <wx/string.h>
+
+#include "widgets/wxPanelWrapper.h"
 
 class NumericTextCtrl;
 class ShuttleGui;
 
-class TimeDialog final : public wxDialog
+class TimeDialog final : public wxDialogWrapper
 {
  public:
 
@@ -52,7 +53,7 @@ class TimeDialog final : public wxDialog
 
    NumericTextCtrl *mTimeCtrl;
 
-   DECLARE_EVENT_TABLE();
+   DECLARE_EVENT_TABLE()
 };
 
 #endif

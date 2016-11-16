@@ -47,7 +47,6 @@
 #include <wx/button.h>
 #include <wx/combobox.h>
 #include <wx/dcclient.h>
-#include <wx/dialog.h>
 #include <wx/file.h>
 #include <wx/filename.h>
 #include <wx/frame.h>
@@ -86,6 +85,7 @@
 #include "../../ShuttleGui.h"
 #include "../../effects/Effect.h"
 #include "../../widgets/NumericTextCtrl.h"
+#include "../../widgets/wxPanelWrapper.h"
 #include "../../widgets/valnum.h"
 #include "../../xml/XMLFileReader.h"
 #include "../../xml/XMLWriter.h"
@@ -154,7 +154,7 @@ public:
 
    void OnExit() {};
 
-   DECLARE_DYNAMIC_CLASS(VSTSubEntry);
+   DECLARE_DYNAMIC_CLASS(VSTSubEntry)
 };
 IMPLEMENT_DYNAMIC_CLASS(VSTSubEntry, wxModule);
 
@@ -695,7 +695,7 @@ void VSTEffectsModule::Check(const wxChar *path)
 //
 ///////////////////////////////////////////////////////////////////////////////
 
-class VSTEffectOptionsDialog final : public wxDialog
+class VSTEffectOptionsDialog final : public wxDialogWrapper
 {
 public:
    VSTEffectOptionsDialog(wxWindow * parent, EffectHostInterface *host);
@@ -714,12 +714,12 @@ private:
    DECLARE_EVENT_TABLE()
 };
 
-BEGIN_EVENT_TABLE(VSTEffectOptionsDialog, wxDialog)
+BEGIN_EVENT_TABLE(VSTEffectOptionsDialog, wxDialogWrapper)
    EVT_BUTTON(wxID_OK, VSTEffectOptionsDialog::OnOk)
 END_EVENT_TABLE()
 
 VSTEffectOptionsDialog::VSTEffectOptionsDialog(wxWindow * parent, EffectHostInterface *host)
-:  wxDialog(parent, wxID_ANY, wxString(_("VST Effect Options")))
+:  wxDialogWrapper(parent, wxID_ANY, wxString(_("VST Effect Options")))
 {
    mHost = host;
 
@@ -1043,6 +1043,30 @@ intptr_t VSTEffect::AudioMaster(AEffect * effect,
    return 0;
 }
 
+#if !defined(__WXMSW__)
+void VSTEffect::ModuleDeleter::operator() (void* p) const
+{
+   if (p)
+      dlclose(p);
+}
+#endif
+
+#if defined(__WXMAC__)
+void VSTEffect::BundleDeleter::operator() (void* p) const
+{
+   if (p)
+      CFRelease(static_cast<CFBundleRef>(p));
+}
+
+void VSTEffect::ResourceDeleter::operator() (void *p) const
+{
+   if (mpHandle) {
+      int resource = (int)p;
+      CFBundleCloseBundleResourceMap(mpHandle->get(), resource);
+   }
+}
+#endif
+
 VSTEffect::VSTEffect(const wxString & path, VSTEffect *master)
 :  mPath(path),
    mMaster(master)
@@ -1052,7 +1076,7 @@ VSTEffect::VSTEffect(const wxString & path, VSTEffect *master)
    mAEffect = NULL;
    mDialog = NULL;
 
-   mTimer = new VSTEffectTimer(this);
+   mTimer = std::make_unique<VSTEffectTimer>(this);
    mTimerGuard = 0;
 
    mInteractive = false;
@@ -1061,14 +1085,12 @@ VSTEffect::VSTEffect(const wxString & path, VSTEffect *master)
    mMidiIns = 0;
    mMidiOuts = 0;
    mSampleRate = 44100;
-   mBlockSize = 0;
+   mBlockSize = mUserBlockSize = 8192;
    mBufferDelay = 0;
    mProcessLevel = 1;         // in GUI thread
    mHasPower = false;
    mWantsIdle = false;
    mWantsEditIdle = false;
-   mUserBlockSize = 8192;
-   mBlockSize = mUserBlockSize;
    mUseLatency = true;
    mReady = false;
 
@@ -1284,12 +1306,12 @@ bool VSTEffect::SetHost(EffectHostInterface *host)
    return true;
 }
 
-int VSTEffect::GetAudioInCount()
+unsigned VSTEffect::GetAudioInCount()
 {
    return mAudioIns;
 }
 
-int VSTEffect::GetAudioOutCount()
+unsigned VSTEffect::GetAudioOutCount()
 {
    return mAudioOuts;
 }
@@ -1304,21 +1326,13 @@ int VSTEffect::GetMidiOutCount()
    return mMidiOuts;
 }
 
-sampleCount VSTEffect::SetBlockSize(sampleCount maxBlockSize)
+size_t VSTEffect::SetBlockSize(size_t maxBlockSize)
 {
-   if (mUserBlockSize > maxBlockSize)
-   {
-      mBlockSize = maxBlockSize;
-   }
-   else
-   {
-      mBlockSize = mUserBlockSize;
-   }
-
+   mBlockSize = std::min((int)maxBlockSize, mUserBlockSize);
    return mBlockSize;
 }
 
-void VSTEffect::SetSampleRate(sampleCount rate)
+void VSTEffect::SetSampleRate(double rate)
 {
    mSampleRate = (float) rate;
 }
@@ -1328,7 +1342,7 @@ sampleCount VSTEffect::GetLatency()
    if (mUseLatency)
    {
       // ??? Threading issue ???
-      sampleCount delay = mBufferDelay;
+      auto delay = mBufferDelay;
       mBufferDelay = 0;
       return delay;
    }
@@ -1336,7 +1350,7 @@ sampleCount VSTEffect::GetLatency()
    return 0;
 }
 
-sampleCount VSTEffect::GetTailSize()
+size_t VSTEffect::GetTailSize()
 {
    return 0;
 }
@@ -1381,7 +1395,7 @@ bool VSTEffect::ProcessFinalize()
    return true;
 }
 
-sampleCount VSTEffect::ProcessBlock(float **inBlock, float **outBlock, sampleCount blockLen)
+size_t VSTEffect::ProcessBlock(float **inBlock, float **outBlock, size_t blockLen)
 {
    // Only call the effect if there's something to do...some do not like zero-length block
    if (blockLen)
@@ -1396,12 +1410,12 @@ sampleCount VSTEffect::ProcessBlock(float **inBlock, float **outBlock, sampleCou
    return blockLen;
 }
 
-int VSTEffect::GetChannelCount()
+unsigned VSTEffect::GetChannelCount()
 {
    return mNumChannels;
 }
 
-void VSTEffect::SetChannelCount(int numChannels)
+void VSTEffect::SetChannelCount(unsigned numChannels)
 {
    mNumChannels = numChannels;
 }
@@ -1424,7 +1438,7 @@ bool VSTEffect::RealtimeInitialize()
    return ProcessInitialize(0, NULL);
 }
 
-bool VSTEffect::RealtimeAddProcessor(int numChannels, float sampleRate)
+bool VSTEffect::RealtimeAddProcessor(unsigned numChannels, float sampleRate)
 {
    VSTEffect *slave = new VSTEffect(mPath, this);
    mSlaves.Add(slave);
@@ -1520,18 +1534,18 @@ bool VSTEffect::RealtimeProcessStart()
    return true;
 }
 
-sampleCount VSTEffect::RealtimeProcess(int group, float **inbuf, float **outbuf, sampleCount numSamples)
+size_t VSTEffect::RealtimeProcess(int group, float **inbuf, float **outbuf, size_t numSamples)
 {
    wxASSERT(numSamples <= mBlockSize);
 
    for (int c = 0; c < mAudioIns; c++)
    {
-      for (sampleCount s = 0; s < numSamples; s++)
+      for (decltype(numSamples) s = 0; s < numSamples; s++)
       {
          mMasterIn[c][s] += inbuf[c][s];
       }
    }
-   mNumSamples = wxMax(numSamples, mNumSamples);
+   mNumSamples = std::max(numSamples, mNumSamples);
 
    return mSlaves[group]->ProcessBlock(inbuf, outbuf, numSamples);
 }
@@ -1729,7 +1743,7 @@ void VSTEffect::SetHostUI(EffectUIHostInterface *host)
 
 bool VSTEffect::PopulateUI(wxWindow *parent)
 {
-   mDialog = (wxDialog *) wxGetTopLevelParent(parent);
+   mDialog = static_cast<wxDialog *>(wxGetTopLevelParent(parent));
    mParent = parent;
 
    mParent->PushEventHandler(this);
@@ -1787,6 +1801,12 @@ bool VSTEffect::HideUI()
 
 bool VSTEffect::CloseUI()
 {
+#ifdef __WXMAC__
+#ifdef __WX_EVTLOOP_BUSY_WAITING__
+   wxEventLoop::SetBusyWaiting(false);
+#endif
+#endif
+
    mParent->RemoveEventHandler(this);
 
    PowerOff();
@@ -1831,6 +1851,7 @@ bool VSTEffect::CanExportPresets()
    return true;
 }
 
+// Throws exceptions rather than reporting errors.
 void VSTEffect::ExportPresets()
 {
    wxString path;
@@ -1979,10 +2000,9 @@ bool VSTEffect::Load()
 
 #if defined(__WXMAC__)
    // Start clean
-   mBundleRef = NULL;
+   mBundleRef.reset();
 
-   // Don't really know what this should be initialize to
-   mResource = -1;
+   mResource = ResourceHandle{};
 
    // Convert the path to a CFSTring
    wxCFStringRef path(realPath);
@@ -1990,33 +2010,30 @@ bool VSTEffect::Load()
    // Convert the path to a URL
    CFURLRef urlRef =
       CFURLCreateWithFileSystemPath(kCFAllocatorDefault,
-                                    path,
-                                    kCFURLPOSIXPathStyle,
-                                    true);
+      path,
+      kCFURLPOSIXPathStyle,
+      true);
    if (urlRef == NULL)
    {
       return false;
    }
 
    // Create the bundle using the URL
-   CFBundleRef bundleRef = CFBundleCreate(kCFAllocatorDefault, urlRef);
+   BundleHandle bundleRef{ CFBundleCreate(kCFAllocatorDefault, urlRef) };
 
    // Done with the URL
    CFRelease(urlRef);
 
    // Bail if the bundle wasn't created
-   if (bundleRef == NULL) 
+   if (!bundleRef)
    {
       return false;
    }
 
    // Retrieve a reference to the executable
-   CFURLRef exeRef = CFBundleCopyExecutableURL(bundleRef);
-   if (exeRef == NULL)
-   {
-      CFRelease(bundleRef);
+   CFURLRef exeRef = CFBundleCopyExecutableURL(bundleRef.get());
+   if (!exeRef)
       return false;
-   }
 
    // Convert back to path
    UInt8 exePath[PLATFORM_MAX_PATH];
@@ -2027,43 +2044,39 @@ bool VSTEffect::Load()
 
    // Bail if we couldn't resolve the executable path
    if (good == FALSE)
-   {
-      CFRelease(bundleRef);
       return false;
-   }
 
    // Attempt to open it
-   mModule = dlopen((char *) exePath, RTLD_NOW | RTLD_LOCAL);
-   if (mModule == NULL)
-   {
-      CFRelease(bundleRef);
+   mModule.reset((char*)dlopen((char *) exePath, RTLD_NOW | RTLD_LOCAL));
+   if (!mModule)
       return false;
-   }
 
    // Try to locate the NEW plugin entry point
-   pluginMain = (vstPluginMain) dlsym(mModule, "VSTPluginMain");
+   pluginMain = (vstPluginMain) dlsym(mModule.get(), "VSTPluginMain");
 
    // If not found, try finding the old entry point
    if (pluginMain == NULL)
    {
-      pluginMain = (vstPluginMain) dlsym(mModule, "main_macho");
+      pluginMain = (vstPluginMain) dlsym(mModule.get(), "main_macho");
    }
 
    // Must not be a VST plugin
    if (pluginMain == NULL)
    {
-      dlclose(mModule);
-      mModule = NULL;
-      CFRelease(bundleRef);
+      mModule.reset();
       return false;
    }
 
    // Need to keep the bundle reference around so we can map the
    // resources.
-   mBundleRef = bundleRef;
+   mBundleRef = std::move(bundleRef);
 
    // Open the resource map ... some plugins (like GRM Tools) need this.
-   mResource = (int) CFBundleOpenBundleResourceMap(bundleRef);
+   mResource = ResourceHandle {
+      reinterpret_cast<char*>(
+         CFBundleOpenBundleResourceMap(mBundleRef.get())),
+      ResourceDeleter{&mBundleRef}
+   };
 
 #elif defined(__WXMSW__)
 
@@ -2071,18 +2084,13 @@ bool VSTEffect::Load()
       wxLogNull nolog;
 
       // Try to load the library
-      wxDynamicLibrary *lib = new wxDynamicLibrary(realPath);
+      auto lib = std::make_unique<wxDynamicLibrary>(realPath);
       if (!lib) 
-      {
          return false;
-      }
 
       // Bail if it wasn't successful
       if (!lib->IsLoaded())
-      {
-         delete lib;
          return false;
-      }
 
       // Try to find the entry point, while suppressing error messages
       pluginMain = (vstPluginMain) lib->GetSymbol(wxT("VSTPluginMain"));
@@ -2090,14 +2098,11 @@ bool VSTEffect::Load()
       {
          pluginMain = (vstPluginMain) lib->GetSymbol(wxT("main"));
          if (pluginMain == NULL)
-         {
-            delete lib;
             return false;
-         }
       }
 
       // Save the library reference
-      mModule = lib;
+      mModule = std::move(lib);
    }
 
 #else
@@ -2121,26 +2126,26 @@ bool VSTEffect::Load()
 #ifndef RTLD_DEEPBIND
 #define RTLD_DEEPBIND 0
 #endif
-   void *lib = dlopen((const char *)wxString(realPath).ToUTF8(), RTLD_NOW | RTLD_LOCAL | RTLD_DEEPBIND);
+   ModuleHandle lib {
+      (char*) dlopen((const char *)wxString(realPath).ToUTF8(),
+                     RTLD_NOW | RTLD_LOCAL | RTLD_DEEPBIND)
+   };
    if (!lib) 
    {
       return false;
    }
 
    // Try to find the entry point, while suppressing error messages
-   pluginMain = (vstPluginMain) dlsym(lib, "VSTPluginMain");
+   pluginMain = (vstPluginMain) dlsym(lib.get(), "VSTPluginMain");
    if (pluginMain == NULL)
    {
-      pluginMain = (vstPluginMain) dlsym(lib, "main");
+      pluginMain = (vstPluginMain) dlsym(lib.get(), "main");
       if (pluginMain == NULL)
-      {
-         dlclose(lib);
          return false;
-      }
    }
 
    // Save the library reference
-   mModule = lib;
+   mModule = std::move(lib);
 
 #endif
 
@@ -2260,13 +2265,6 @@ void VSTEffect::Unload()
       CloseUI();
    }
 
-   if (mTimer)
-   {
-      mTimer->Stop();
-      delete mTimer;
-      mTimer = NULL;
-   }
-
    if (mAEffect)
    {
       // Turn the power off
@@ -2280,32 +2278,11 @@ void VSTEffect::Unload()
    if (mModule)
    {
 #if defined(__WXMAC__)
-
-      if (mResource != -1)
-      {
-         CFBundleCloseBundleResourceMap((CFBundleRef) mBundleRef, mResource);
-         mResource = -1;
-      }
-
-      if (mBundleRef != NULL)
-      {
-         CFRelease((CFBundleRef) mBundleRef);
-         mBundleRef = NULL;
-      }
-
-      dlclose(mModule);
-
-#elif defined(__WXMSW__)
-
-      delete (wxDynamicLibrary *) mModule;
-
-#else
-
-      dlclose(mModule);
-
+      mResource = ResourceHandle{};
+      mBundleRef.reset();
 #endif
 
-      mModule = NULL;
+      mModule.reset();
       mAEffect = NULL;
    }
 }
@@ -2810,13 +2787,13 @@ void VSTEffect::BuildFancy()
    // Turn the power on...some effects need this when the editor is open
    PowerOn();
 
-   mControl = new VSTControl;
-   if (!mControl)
+   auto control = std::make_unique<VSTControl>();
+   if (!control)
    {
       return;
    }
 
-   if (!mControl->Create(mParent, this))
+   if (!control->Create(mParent, this))
    {
       return;
    }
@@ -2824,7 +2801,7 @@ void VSTEffect::BuildFancy()
    {
       auto mainSizer = std::make_unique<wxBoxSizer>(wxVERTICAL);
 
-      mainSizer->Add(mControl, 0, wxALIGN_CENTER);
+      mainSizer->Add((mControl = control.release()), 0, wxALIGN_CENTER);
 
       mParent->SetMinSize(wxDefaultSize);
       mParent->SetSizer(mainSizer.release());
@@ -2833,6 +2810,12 @@ void VSTEffect::BuildFancy()
    NeedEditIdle(true);
 
    mDialog->Connect(wxEVT_SIZE, wxSizeEventHandler(VSTEffect::OnSize));
+
+#ifdef __WXMAC__
+#ifdef __WX_EVTLOOP_BUSY_WAITING__
+   wxEventLoop::SetBusyWaiting(true);
+#endif
+#endif
 
    return;
 }
@@ -3653,6 +3636,7 @@ void VSTEffect::SaveFXProgram(wxMemoryBuffer & buf, int index)
    return;
 }
 
+// Throws exceptions rather than giving error return.
 void VSTEffect::SaveXML(const wxFileName & fn)
 {
    XMLFileWriter xmlFile;

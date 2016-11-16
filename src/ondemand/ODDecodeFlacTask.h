@@ -51,7 +51,7 @@ class ODDecodeFlacTask final : public ODDecodeTask
    virtual ~ODDecodeFlacTask();
 
 
-   std::unique_ptr<ODTask> Clone() const override;
+   movable_ptr<ODTask> Clone() const override;
    ///Creates an ODFileDecoder that decodes a file of filetype the subclass handles.
    ODFileDecoder* CreateFileDecoder(const wxString & fileName) override;
 
@@ -106,7 +106,7 @@ public:
    ///this->ReadData(sampleData, floatSample, 0, mLen);
    ///This class should call ReadHeader() first, so it knows the length, and can prepare
    ///the file object if it needs to.
-   int Decode(SampleBuffer & data, sampleFormat & format, sampleCount start, sampleCount len, unsigned int channel) override;
+   int Decode(SampleBuffer & data, sampleFormat & format, sampleCount start, size_t len, unsigned int channel) override;
 
 
    ///Read header.  Subclasses must override.  Probably should save the info somewhere.
@@ -119,7 +119,7 @@ public:
 private:
    friend class FLACImportFileHandle;
    sampleFormat          mFormat;
-   ODFLACFile           *mFile;
+   std::unique_ptr<ODFLACFile> mFile;
    ODLock         mFlacFileLock;//for mFile;
    wxFFile               mHandle;
    unsigned long         mSampleRate;

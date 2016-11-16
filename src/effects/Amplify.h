@@ -44,9 +44,9 @@ public:
 
    // EffectClientInterface implementation
 
-   int GetAudioInCount() override;
-   int GetAudioOutCount() override;
-   sampleCount ProcessBlock(float **inBlock, float **outBlock, sampleCount blockLen) override;
+   unsigned GetAudioInCount() override;
+   unsigned GetAudioOutCount() override;
+   size_t ProcessBlock(float **inBlock, float **outBlock, size_t blockLen) override;
    bool GetAutomationParameters(EffectAutomationParameters & parms) override;
    bool SetAutomationParameters(EffectAutomationParameters & parms) override;
    bool LoadFactoryDefaults() override;
@@ -82,7 +82,7 @@ private:
    wxTextCtrl *mNewPeakT;
    wxCheckBox *mClip;
 
-   DECLARE_EVENT_TABLE();
+   DECLARE_EVENT_TABLE()
 };
 
 #endif // __AUDACITY_EFFECT_AMPLIFY__

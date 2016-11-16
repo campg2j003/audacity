@@ -124,7 +124,7 @@ private:
    // EffectEqualization implementation
 
    // Number of samples in an FFT window
-   enum {windowSize=16384};   //MJS - work out the optimum for this at run time?  Have a dialog box for it?
+   enum : size_t {windowSize=16384};   //MJS - work out the optimum for this at run time?  Have a dialog box for it?
 
    // Low frequency of the FFT.  20Hz is the
    // low range of human hearing
@@ -133,7 +133,7 @@ private:
    bool ProcessOne(int count, WaveTrack * t,
                    sampleCount start, sampleCount len);
    bool CalcFilter();
-   void Filter(sampleCount len, float *buffer);
+   void Filter(size_t len, float *buffer);
    
    void Flatten();
    void ForceRecalc();
@@ -143,7 +143,7 @@ private:
 
    void LoadCurves(const wxString &fileName = wxEmptyString, bool append = false);
    void SaveCurves(const wxString &fileName = wxEmptyString);
-   // Merge new curves only or update all factory presets.
+   // Merge NEW curves only or update all factory presets.
    void UpdateDefaultCurves( bool updateAll = false);
    void Select(int sel);
    void setCurve(int currentCurve);
@@ -193,7 +193,7 @@ private:
    float *mFFTBuffer;
    float *mFilterFuncR;
    float *mFilterFuncI;
-   int mM;
+   size_t mM;
    wxString mCurveName;
    bool mLin;
    float mdBMax;
@@ -212,20 +212,19 @@ private:
    bool mDisallowCustom;
    double mLoFreq;
    double mHiFreq;
-   long mWindowSize;
+   size_t mWindowSize;
    bool mDirty;
    int mSlidersOld[NUMBER_OF_BANDS];
    double mEQVals[NUMBER_OF_BANDS+1];
 
    EQCurveArray mCurves;
 
-   Envelope *mLogEnvelope;
-   Envelope *mLinEnvelope;
+   std::unique_ptr<Envelope> mLogEnvelope, mLinEnvelope;
    Envelope *mEnvelope;
 
 #ifdef EXPERIMENTAL_EQ_SSE_THREADED
    bool mBench;
-   EffectEqualization48x *mEffectEqualization48x;
+   std::unique_ptr<EffectEqualization48x> mEffectEqualization48x;
    friend class EffectEqualization48x;
 #endif
 
@@ -273,13 +272,13 @@ private:
    wxBoxSizer *szrM;
 #endif
 
-   DECLARE_EVENT_TABLE();
+   DECLARE_EVENT_TABLE()
 
    friend class EqualizationPanel;
    friend class EditCurvesDialog;
 };
 
-class EqualizationPanel final : public wxPanel
+class EqualizationPanel final : public wxPanelWrapper
 {
 public:
    EqualizationPanel(EffectEqualization *effect, wxWindow *parent);
@@ -312,11 +311,11 @@ private:
 
    bool mRecalcRequired;
 
-   wxBitmap *mBitmap;
+   std::unique_ptr<wxBitmap> mBitmap;
    wxRect mEnvRect;
    int mWidth;
    int mHeight;
-//   long mWindowSize;
+//   size_t mWindowSize;
 //   float *mFilterFuncR;
 //   float *mFilterFuncI;
    float *mOutr;
@@ -325,12 +324,12 @@ private:
 //   double mLoFreq;
 //   double mHiFreq;
 
-   DECLARE_EVENT_TABLE();
+   DECLARE_EVENT_TABLE()
 };
 
 // EditCurvesDialog.  Note that the 'modified' curve used to be called 'custom' but is now called 'unnamed'
 // Some things that deal with 'unnamed' curves still use, for example, 'mCustomBackup' as variable names.
-class EditCurvesDialog final : public wxDialog
+class EditCurvesDialog final : public wxDialogWrapper
 {
 public:
    EditCurvesDialog(wxWindow * parent, EffectEqualization * effect, int position);
@@ -369,6 +368,8 @@ private:
    void OnLibrary( wxCommandEvent &event );
    void OnDefaults( wxCommandEvent &event );
    void OnOK(wxCommandEvent &event);
+
+   void OnListSelectionChange( wxListEvent &event );
    DECLARE_EVENT_TABLE()
 };
 

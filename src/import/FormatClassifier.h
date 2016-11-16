@@ -11,6 +11,13 @@
 #ifndef __AUDACITY_FORMATCLASSIFIER_H_
 #define __AUDACITY_FORMATCLASSIFIER_H_
 
+#include <vector>
+#include "../SampleFormat.h"
+#include "MultiFormatReader.h"
+#include "SpecPowerMeter.h"
+
+#include <sndfile.h>
+
 #ifndef SNDFILE_1
 #error Requires libsndfile 1.0.3 or higher
 #endif
@@ -72,7 +79,7 @@ private:
    SpecPowerMeter       mMeter;
 
 #ifdef FORMATCLASSIFIER_SIGNAL_DEBUG
-   DebugWriter*         mpWriter;
+   std::unique_ptr<DebugWriter> mpWriter;
 #endif
 
    float*               mSigBuffer;
@@ -83,7 +90,7 @@ private:
    float*               mStereoFeat;
    
    FormatClassT         mResultFormat;
-   int                  mResultChannels;
+   unsigned             mResultChannels { 0 };
 
 public:
    FormatClassifier(const char* filename);
@@ -91,7 +98,7 @@ public:
 
    FormatClassT GetResultFormat();
    int GetResultFormatLibSndfile();
-   int GetResultChannels();
+   unsigned GetResultChannels();
 private:
    void Run();
    void ReadSignal(FormatClassT format, size_t stride);

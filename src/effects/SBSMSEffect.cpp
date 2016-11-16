@@ -36,11 +36,7 @@ public:
       buf = NULL;
       leftBuffer = NULL;
       rightBuffer = NULL;
-      quality = NULL;
-      iface = NULL;
-      sbsms = NULL;
 
-      resampler = NULL;
       SBSMSBuf = NULL;
       outputLeftTrack = NULL;
       outputRightTrack = NULL;
@@ -52,31 +48,27 @@ public:
       if(leftBuffer)          free(leftBuffer);
       if(rightBuffer)         free(rightBuffer);
       if(SBSMSBuf)            free(SBSMSBuf);
-      if(quality)             delete quality;
-      if(sbsms)               delete sbsms;
-      if(iface)           delete iface;
-      if(resampler)           delete resampler;
    }
 
    bool bPitch;
    audio *buf;
    double ratio;
    sampleCount processed;
-   sampleCount blockSize;
-   sampleCount SBSMSBlockSize;
+   size_t blockSize;
+   long SBSMSBlockSize;
    sampleCount offset;
    sampleCount end;
    float *leftBuffer;
    float *rightBuffer;
    WaveTrack *leftTrack;
    WaveTrack *rightTrack;
-   SBSMS *sbsms;
-   SBSMSInterface *iface;
+   std::unique_ptr<SBSMS> sbsms;
+   std::unique_ptr<SBSMSInterface> iface;
    audio *SBSMSBuf;
 
    // Not required by callbacks, but makes for easier cleanup
-   Resampler *resampler;
-   SBSMSQuality *quality;
+   std::unique_ptr<Resampler> resampler;
+   std::unique_ptr<SBSMSQuality> quality;
    std::unique_ptr<WaveTrack> outputLeftTrack;
    std::unique_ptr<WaveTrack> outputRightTrack;
 };
@@ -106,18 +98,17 @@ long resampleCB(void *cb_data, SBSMSFrame *data)
 {
    ResampleBuf *r = (ResampleBuf*) cb_data;
 
-   long blockSize = r->leftTrack->GetBestBlockSize(r->offset);
-
-   //Adjust the block size if it is the final block in the track
-   if (r->offset + blockSize > r->end)
-      blockSize = r->end - r->offset;
+   auto blockSize = limitSampleBufferSize(
+      r->leftTrack->GetBestBlockSize(r->offset),
+      r->end - r->offset
+   );
 
    // Get the samples from the tracks and put them in the buffers.
    r->leftTrack->Get((samplePtr)(r->leftBuffer), floatSample, r->offset, blockSize);
    r->rightTrack->Get((samplePtr)(r->rightBuffer), floatSample, r->offset, blockSize);
 
    // convert to sbsms audio format
-   for(int i=0; i<blockSize; i++) {
+   for(decltype(blockSize) i=0; i<blockSize; i++) {
       r->buf[i][0] = r->leftBuffer[i];
       r->buf[i][1] = r->rightBuffer[i];
    }
@@ -125,8 +116,8 @@ long resampleCB(void *cb_data, SBSMSFrame *data)
    data->buf = r->buf;
    data->size = blockSize;
    if(r->bPitch) {
-     float t0 = (float)(r->processed) / r->iface->getSamplesToInput();
-     float t1 = (float)(r->processed + blockSize) / r->iface->getSamplesToInput();
+     float t0 = r->processed.as_float() / r->iface->getSamplesToInput();
+     float t1 = (r->processed + blockSize).as_float() / r->iface->getSamplesToInput();
      data->ratio0 = r->iface->getStretch(t0);
      data->ratio1 = r->iface->getStretch(t1);
    } else {
@@ -141,12 +132,12 @@ long resampleCB(void *cb_data, SBSMSFrame *data)
 long postResampleCB(void *cb_data, SBSMSFrame *data)
 {
    ResampleBuf *r = (ResampleBuf*) cb_data;
-   long sampleCount = r->sbsms->read(r->iface, r->SBSMSBuf, r->SBSMSBlockSize);
+   auto count = r->sbsms->read(r->iface.get(), r->SBSMSBuf, r->SBSMSBlockSize);
    data->buf = r->SBSMSBuf;
-   data->size = sampleCount;
+   data->size = count;
    data->ratio0 = 1.0 / r->ratio;
    data->ratio1 = 1.0 / r->ratio;
-   return sampleCount;
+   return count;
 }
 
 void EffectSBSMS :: setParameters(double rateStart, double rateEnd, double pitchStart, double pitchEnd,
@@ -164,36 +155,40 @@ void EffectSBSMS :: setParameters(double rateStart, double rateEnd, double pitch
    this->bPitchReferenceInput = bPitchReferenceInput;
 }
 
-TimeWarper *createTimeWarper(double t0, double t1, double duration,
+void EffectSBSMS::setParameters(double tempoRatio, double pitchRatio)
+{
+   setParameters(tempoRatio, tempoRatio, pitchRatio, pitchRatio,
+                 SlideConstant, SlideConstant, false, false, false);
+}
+
+std::unique_ptr<TimeWarper> createTimeWarper(double t0, double t1, double duration,
                              double rateStart, double rateEnd, SlideType rateSlideType)
 {
-   TimeWarper *warper = NULL;
+   std::unique_ptr<TimeWarper> warper;
    if (rateStart == rateEnd || rateSlideType == SlideConstant) {
-      warper = new LinearTimeWarper(t0, t0, t1, t0+duration);
+      warper = std::make_unique<LinearTimeWarper>(t0, t0, t1, t0+duration);
    } else if(rateSlideType == SlideLinearInputRate) {
-      warper = new LinearInputRateTimeWarper(t0, t1, rateStart, rateEnd);
+      warper = std::make_unique<LinearInputRateTimeWarper>(t0, t1, rateStart, rateEnd);
    } else if(rateSlideType == SlideLinearOutputRate) {
-      warper = new LinearOutputRateTimeWarper(t0, t1, rateStart, rateEnd);
+      warper = std::make_unique<LinearOutputRateTimeWarper>(t0, t1, rateStart, rateEnd);
    } else if(rateSlideType == SlideLinearInputStretch) {
-      warper = new LinearInputStretchTimeWarper(t0, t1, rateStart, rateEnd);
+      warper = std::make_unique<LinearInputStretchTimeWarper>(t0, t1, rateStart, rateEnd);
    } else if(rateSlideType == SlideLinearOutputStretch) {
-      warper = new LinearOutputStretchTimeWarper(t0, t1, rateStart, rateEnd);
+      warper = std::make_unique<LinearOutputStretchTimeWarper>(t0, t1, rateStart, rateEnd);
    } else if(rateSlideType == SlideGeometricInput) {
-      warper = new GeometricInputTimeWarper(t0, t1, rateStart, rateEnd);
+      warper = std::make_unique<GeometricInputTimeWarper>(t0, t1, rateStart, rateEnd);
    } else if(rateSlideType == SlideGeometricOutput) {
-      warper = new GeometricOutputTimeWarper(t0, t1, rateStart, rateEnd);
+      warper = std::make_unique<GeometricOutputTimeWarper>(t0, t1, rateStart, rateEnd);
    }
    return warper;
 }
 
 // Labels inside the affected region are moved to match the audio; labels after
 // it are shifted along appropriately.
-bool EffectSBSMS::ProcessLabelTrack(Track *t)
+bool EffectSBSMS::ProcessLabelTrack(LabelTrack *lt)
 {
-   TimeWarper *warper = createTimeWarper(mT0,mT1,(mT1-mT0)*mTotalStretch,rateStart,rateEnd,rateSlideType);
-   SetTimeWarper(new RegionTimeWarper(mT0, mT1, warper));
-   LabelTrack *lt = (LabelTrack*)t;
-   if (lt == NULL) return false;
+   auto warper = createTimeWarper(mT0,mT1,(mT1-mT0)*mTotalStretch,rateStart,rateEnd,rateSlideType);
+   SetTimeWarper(std::make_unique<RegionTimeWarper>(mT0, mT1, std::move(warper)));
    lt->WarpLabels(*GetTimeWarper());
    return true;
 }
@@ -217,7 +212,7 @@ bool EffectSBSMS::Process()
    //Iterate over each track
    //Track::All is needed because this effect needs to introduce silence in the group tracks to keep sync
    this->CopyInputTracks(Track::All); // Set up mOutputTracks.
-   TrackListIterator iter(mOutputTracks);
+   TrackListIterator iter(mOutputTracks.get());
    Track* t;
    mCurTrackNum = 0;
 
@@ -234,7 +229,7 @@ bool EffectSBSMS::Process()
       if (t->GetKind() == Track::Label &&
             (t->GetSelected() || (mustSync && t->IsSyncLockSelected())) )
       {
-         if (!ProcessLabelTrack(t)) {
+         if (!ProcessLabelTrack(static_cast<LabelTrack*>(t))) {
             bGoodResult = false;
             break;
          }
@@ -254,15 +249,14 @@ bool EffectSBSMS::Process()
 
          // Process only if the right marker is to the right of the left marker
          if (mCurT1 > mCurT0) {
-            sampleCount start;
-            sampleCount end;
-            start = leftTrack->TimeToLongSamples(mCurT0);
-            end = leftTrack->TimeToLongSamples(mCurT1);
+            auto start = leftTrack->TimeToLongSamples(mCurT0);
+            auto end = leftTrack->TimeToLongSamples(mCurT1);
 
             WaveTrack* rightTrack = NULL;
             if (leftTrack->GetLinked()) {
                double t;
-               rightTrack = (WaveTrack*)(iter.Next());
+               // Assume linked track is wave or null
+               rightTrack = static_cast<WaveTrack*>(iter.Next());
 
                //Adjust bounds by the right tracks markers
                t = rightTrack->GetStartTime();
@@ -278,16 +272,18 @@ bool EffectSBSMS::Process()
 
                mCurTrackNum++; // Increment for rightTrack, too.
             }
-            sampleCount trackStart = leftTrack->TimeToLongSamples(leftTrack->GetStartTime());
-            sampleCount trackEnd = leftTrack->TimeToLongSamples(leftTrack->GetEndTime());
+            const auto trackStart =
+               leftTrack->TimeToLongSamples(leftTrack->GetStartTime());
+            const auto trackEnd =
+               leftTrack->TimeToLongSamples(leftTrack->GetEndTime());
 
             // SBSMS has a fixed sample rate - we just convert to its sample rate and then convert back
             float srTrack = leftTrack->GetRate();
-            float srProcess = bLinkRatePitch?srTrack:44100.0;
+            float srProcess = bLinkRatePitch ? srTrack : 44100.0;
 
             // the resampler needs a callback to supply its samples
             ResampleBuf rb;
-            sampleCount maxBlockSize = leftTrack->GetMaxBlockSize();
+            auto maxBlockSize = leftTrack->GetMaxBlockSize();
             rb.blockSize = maxBlockSize;
             rb.buf = (audio*)calloc(rb.blockSize,sizeof(audio));
             rb.leftTrack = leftTrack;
@@ -296,16 +292,13 @@ bool EffectSBSMS::Process()
             rb.rightBuffer = (float*)calloc(maxBlockSize,sizeof(float));
 
             // Samples in selection
-            sampleCount samplesIn = end-start;
+            auto samplesIn = end - start;
 
             // Samples for SBSMS to process after resampling
-            sampleCount samplesToProcess = (sampleCount) ((float)samplesIn*(srProcess/srTrack));
+            auto samplesToProcess = (sampleCount) (samplesIn.as_float() * (srProcess/srTrack));
 
             SlideType outSlideType;
             SBSMSResampleCB outResampleCB;
-
-            sampleCount processPresamples = 0;
-            sampleCount trackPresamples = 0;
 
             if(bLinkRatePitch) {
               rb.bPitch = true;
@@ -313,34 +306,51 @@ bool EffectSBSMS::Process()
               outResampleCB = resampleCB;
               rb.offset = start;
               rb.end = end;
-              rb.iface = new SBSMSInterfaceSliding(&rateSlide,&pitchSlide,
-                                                       bPitchReferenceInput,
-                                                       samplesToProcess,0,
-                                                       NULL);
+               // Third party library has its own type alias, check it
+               static_assert(sizeof(sampleCount::type) <=
+                             sizeof(_sbsms_::SampleCountType),
+                             "Type _sbsms_::SampleCountType is too narrow to hold a sampleCount");
+              rb.iface = std::make_unique<SBSMSInterfaceSliding>
+                  (&rateSlide, &pitchSlide, bPitchReferenceInput,
+                   static_cast<_sbsms_::SampleCountType>
+                      ( samplesToProcess.as_long_long() ),
+                   0, nullptr);
                
-             
             } else {
               rb.bPitch = false;
               outSlideType = (srProcess==srTrack?SlideIdentity:SlideConstant);
               outResampleCB = postResampleCB;
               rb.ratio = srProcess/srTrack;
-              rb.quality = new SBSMSQuality(&SBSMSQualityStandard);
-              rb.resampler = new Resampler(resampleCB, &rb, srProcess==srTrack?SlideIdentity:SlideConstant);
-              rb.sbsms = new SBSMS(rightTrack?2:1,rb.quality,true);
+              rb.quality = std::make_unique<SBSMSQuality>(&SBSMSQualityStandard);
+              rb.resampler = std::make_unique<Resampler>(resampleCB, &rb, srProcess==srTrack?SlideIdentity:SlideConstant);
+              rb.sbsms = std::make_unique<SBSMS>(rightTrack ? 2 : 1, rb.quality.get(), true);
               rb.SBSMSBlockSize = rb.sbsms->getInputFrameSize();
               rb.SBSMSBuf = (audio*)calloc(rb.SBSMSBlockSize,sizeof(audio));
 
-              processPresamples = wxMin(rb.quality->getMaxPresamples(),
-                                        (long)((float)(start-trackStart)*(srProcess/srTrack)));
-              trackPresamples = wxMin(start-trackStart,
-                                      (long)((float)(processPresamples)*(srTrack/srProcess)));
+              // Note: width of getMaxPresamples() is only long.  Widen it
+              decltype(start) processPresamples = rb.quality->getMaxPresamples();
+              processPresamples =
+                 std::min(processPresamples,
+                          decltype(processPresamples)
+                             (( start - trackStart ).as_float() *
+                                 (srProcess/srTrack)));
+              auto trackPresamples = start - trackStart;
+              trackPresamples =
+                  std::min(trackPresamples,
+                           decltype(trackPresamples)
+                              (processPresamples.as_float() *
+                                  (srTrack/srProcess)));
               rb.offset = start - trackPresamples;
               rb.end = trackEnd;
-              rb.iface = new SBSMSEffectInterface(rb.resampler,
-                                                      &rateSlide,&pitchSlide,
-                                                      bPitchReferenceInput,
-                                                      samplesToProcess,processPresamples,
-                                                      rb.quality);
+              rb.iface = std::make_unique<SBSMSEffectInterface>
+                  (rb.resampler.get(), &rateSlide, &pitchSlide,
+                   bPitchReferenceInput,
+                   // UNSAFE_SAMPLE_COUNT_TRUNCATION
+                   // The argument type is only long!
+                   static_cast<long> ( samplesToProcess.as_long_long() ),
+                   // This argument type is also only long!
+                   static_cast<long> ( processPresamples.as_long_long() ),
+                   rb.quality.get());
             }
             
             Resampler resampler(outResampleCB,&rb,outSlideType);
@@ -353,7 +363,7 @@ bool EffectSBSMS::Process()
             sampleCount samplesToOutput = rb.iface->getSamplesToOutput();
 
             // Samples in output after resampling back
-            sampleCount samplesOut = (sampleCount) ((float)samplesToOutput * (srTrack/srProcess));
+            auto samplesOut = (sampleCount) (samplesToOutput.as_float() * (srTrack/srProcess));
 
             // Duration in track time
             double duration =  (mCurT1-mCurT0) * mTotalStretch;
@@ -361,8 +371,8 @@ bool EffectSBSMS::Process()
             if(duration > maxDuration)
                maxDuration = duration;
 
-            TimeWarper *warper = createTimeWarper(mCurT0,mCurT1,maxDuration,rateStart,rateEnd,rateSlideType);
-            SetTimeWarper(warper);
+            auto warper = createTimeWarper(mCurT0,mCurT1,maxDuration,rateStart,rateEnd,rateSlideType);
+            SetTimeWarper(std::move(warper));
 
             rb.outputLeftTrack = mFactory->NewWaveTrack(leftTrack->GetSampleFormat(),
                                                         leftTrack->GetRate());
@@ -374,12 +384,9 @@ bool EffectSBSMS::Process()
 
             // process
             while(pos<samplesOut && outputCount) {
-               long frames;
-               if(pos+SBSMSOutBlockSize>samplesOut) {
-                  frames = samplesOut - pos;
-               } else {
-                  frames = SBSMSOutBlockSize;
-               }
+               const auto frames =
+                  limitSampleBufferSize( SBSMSOutBlockSize, samplesOut - pos );
+
                outputCount = resampler.read(outBuf,frames);
                for(int i = 0; i < outputCount; i++) {
                   outBufLeft[i] = outBuf[i][0];
@@ -391,7 +398,7 @@ bool EffectSBSMS::Process()
                if(rightTrack)
                   rb.outputRightTrack->Append((samplePtr)outBufRight, floatSample, outputCount);
 
-               double frac = (double)pos/(double)samplesOut;
+               double frac = (double)pos / samplesOut.as_double();
                int nWhichTrack = mCurTrackNum;
                if(rightTrack) {
                   nWhichTrack = 2*(mCurTrackNum/2);

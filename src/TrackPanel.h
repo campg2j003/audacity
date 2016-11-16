@@ -73,7 +73,6 @@ DECLARE_EXPORTED_EVENT_TYPE(AUDACITY_DLL_API, EVT_TRACK_PANEL_TIMER, -1);
 
 enum {
    kTimerInterval = 50, // milliseconds
-   kOneSecondCountdown = 1000 / kTimerInterval,
 };
 
 class AUDACITY_DLL_API TrackInfo
@@ -122,10 +121,8 @@ private:
 
    TrackPanel * pParent;
    wxFont mFont;
-   LWSlider *mGainCaptured;
-   LWSlider *mPanCaptured;
-   LWSlider *mGain;
-   LWSlider *mPan;
+   std::unique_ptr<LWSlider>
+      mGainCaptured, mPanCaptured, mGain, mPan;
 
    friend class TrackPanel;
 };
@@ -141,13 +138,14 @@ class AUDACITY_DLL_API TrackPanel final : public OverlayPanel {
               wxWindowID id,
               const wxPoint & pos,
               const wxSize & size,
-              TrackList * tracks,
+              const std::shared_ptr<TrackList> &tracks,
               ViewInfo * viewInfo,
               TrackPanelListener * listener,
               AdornedRulerPanel * ruler );
 
    virtual ~ TrackPanel();
 
+   virtual void BuildMenusIfNeeded(void);
    virtual void BuildMenus(void);
 
    virtual void DeleteMenus(void);
@@ -242,7 +240,10 @@ class AUDACITY_DLL_API TrackPanel final : public OverlayPanel {
     * @param menu the menu to add the commands to.
     */
    virtual void BuildCommonDropMenuItems(wxMenu * menu);
-   static void BuildVRulerMenuItems(wxMenu * menu, int firstId, const wxArrayString &names);
+
+   // left over from PRL's vertical ruler context menu experiment in 2.1.2
+   // static void BuildVRulerMenuItems(wxMenu * menu, int firstId, const wxArrayString &names);
+
    virtual bool IsAudioActive();
    virtual bool IsUnsafe();
    virtual bool HandleLabelTrackClick(LabelTrack * lTrack, wxRect &rect, wxMouseEvent & event);
@@ -288,11 +289,16 @@ class AUDACITY_DLL_API TrackPanel final : public OverlayPanel {
 #endif
 
    // AS: Selection handling
+   void SelectTrack(Track *track, bool selected, bool updateLastPicked = true);
+   void SelectRangeOfTracks(Track *sTrack, Track *eTrack);
+   size_t GetTrackCount();
+   size_t GetSelectedTrackCount();
    virtual void HandleSelect(wxMouseEvent & event);
    virtual void SelectionHandleDrag(wxMouseEvent &event, Track *pTrack);
 
 protected:
 
+   virtual void ChangeSelectionOnShiftClick(Track * pTrack);
    virtual void SelectionHandleClick(wxMouseEvent &event,
                                      Track* pTrack, wxRect rect);
    virtual void StartSelection (int mouseXCoordinate, int trackLeftEdge);
@@ -302,6 +308,7 @@ protected:
 
 public:
    virtual void UpdateAccessibility();
+   void MessageForScreenReader(const wxString& message);
 
 #ifdef EXPERIMENTAL_SPECTRAL_EDITING
 public:
@@ -374,7 +381,7 @@ protected:
        bool fixedMousePoint);
 
    // Handle sample editing using the 'draw' tool.
-   virtual bool IsSampleEditingPossible( wxMouseEvent & event, Track * t );
+   virtual bool IsSampleEditingPossible( wxMouseEvent & event, const WaveTrack * t );
    virtual void HandleSampleEditing(wxMouseEvent & event);
    float FindSampleEditingLevel(wxMouseEvent &event, double dBRange, double t0);
    virtual void HandleSampleEditingClick( wxMouseEvent & event );
@@ -384,7 +391,7 @@ protected:
    // MM: Handle mouse wheel rotation
    virtual void HandleWheelRotation(wxMouseEvent & event);
    virtual void HandleWheelRotationInVRuler
-      (wxMouseEvent &event, Track *pTrack, const wxRect &rect);
+      (wxMouseEvent &event, double steps, Track *pTrack, const wxRect &rect);
 
    // Handle resizing.
    virtual void HandleResizeClick(wxMouseEvent & event);
@@ -393,6 +400,12 @@ protected:
    virtual void HandleResize(wxMouseEvent & event);
 
    virtual void HandleLabelClick(wxMouseEvent & event);
+
+public:
+   virtual void HandleListSelection(Track *t, bool shift, bool ctrl,
+                                    bool modifyState = true);
+
+protected:
    virtual void HandleRearrange(wxMouseEvent & event);
    virtual void CalculateRearrangingThresholds(wxMouseEvent & event);
    virtual void HandleClosing(wxMouseEvent & event);
@@ -452,7 +465,7 @@ protected:
    virtual void OnZoomFitVertical(wxCommandEvent &event);
 
    virtual void SetMenuCheck( wxMenu & menu, int newId );
-   virtual void SetRate(Track *pTrack, double rate);
+   virtual void SetRate(WaveTrack *pTrack, double rate);
    virtual void OnRateChange(wxCommandEvent &event);
    virtual void OnRateOther(wxCommandEvent &event);
 
@@ -478,7 +491,7 @@ protected:
 // JKC Nov-2011: These four functions only used from within a dll such as mod-track-panel
 // They work around some messy problems with constructors.
 public:
-   TrackList * GetTracks(){ return mTracks;}
+   TrackList * GetTracks(){ return mTracks.get(); }
    ViewInfo * GetViewInfo(){ return mViewInfo;}
    TrackPanelListener * GetListener(){ return mListener;}
    AdornedRulerPanel * GetRuler(){ return mRuler;}
@@ -488,7 +501,7 @@ public:
               wxWindowID id,
               const wxPoint & pos,
               const wxSize & size,
-              TrackList * tracks,
+              const std::shared_ptr<TrackList> &tracks,
               ViewInfo * viewInfo,
               TrackPanelListener * listener,
               AdornedRulerPanel * ruler);
@@ -521,7 +534,7 @@ protected:
    int mLabelTrackStartXPos;
    int mLabelTrackStartYPos;
 
-   virtual wxString TrackSubText(Track *t);
+   virtual wxString TrackSubText(WaveTrack *t);
 
    TrackInfo mTrackInfo;
  public:
@@ -530,12 +543,12 @@ protected:
 protected:
    TrackPanelListener *mListener;
 
-   TrackList *mTracks;
+   std::shared_ptr<TrackList> mTracks;
    ViewInfo *mViewInfo;
 
    AdornedRulerPanel *mRuler;
 
-   TrackArtist *mTrackArtist;
+   std::unique_ptr<TrackArtist> mTrackArtist;
 
    class AUDACITY_DLL_API AudacityTimer final : public wxTimer {
    public:
@@ -547,8 +560,8 @@ protected:
        // (no GDK event behind it) and that it therefore isn't processed
        // within the YieldFor(..) of the clipboard operations (workaround
        // for Debian bug #765341).
-       wxTimerEvent *event = new wxTimerEvent(*this);
-       parent->GetEventHandler()->QueueEvent(event);
+       // QueueEvent() will take ownership of the event
+       parent->GetEventHandler()->QueueEvent(safenew wxTimerEvent(*this));
      }
      TrackPanel *parent;
    } mTimer;
@@ -560,11 +573,13 @@ protected:
    int mPrevHeight;
 
    SelectedRegion mInitialSelection;
-   // Extra indirection to avoid the stupid MSW compiler warnings!  Rrrr!
-   std::vector<bool> *mInitialTrackSelection;
+   std::vector<bool> mInitialTrackSelection;
+   Track *mInitialLastPickedTrack {};
 
    bool mSelStartValid;
    double mSelStart;
+
+   Track *mLastPickedTrack {};
 
 #ifdef EXPERIMENTAL_SPECTRAL_EDITING
    enum eFreqSelMode {
@@ -585,7 +600,7 @@ protected:
    // FREQ_SEL_BOTTOM_FREE,
    // and is ignored otherwise.
    double mFreqSelPin;
-   const WaveTrack *mFreqSelTrack;
+   const WaveTrack *mFreqSelTrack = NULL;
    std::unique_ptr<SpectrumAnalyst> mFrequencySnapper;
 
    // For toggling of spectral seletion
@@ -643,7 +658,7 @@ protected:
    // line up with existing tracks or labels.  mSnapLeft and mSnapRight
    // are the horizontal index of pixels to display user feedback
    // guidelines so the user knows when such snapping is taking place.
-   SnapManager *mSnapManager;
+   std::unique_ptr<SnapManager> mSnapManager;
    wxInt64 mSnapLeft;
    wxInt64 mSnapRight;
    bool mSnapPreferRightEdge;
@@ -661,7 +676,7 @@ protected:
       (bool shiftDown, wxString &tip, const wxCursor ** ppCursor);
 
    void HandleCenterFrequencyClick
-      (bool shiftDown, Track *pTrack, double value);
+      (bool shiftDown, const WaveTrack *pTrack, double value);
 
    double PositionToFrequency(const WaveTrack *wt,
                               bool maySnap,
@@ -756,24 +771,26 @@ protected:
       mStretchCursor, mStretchLeftCursor, mStretchRightCursor;
 #endif
 
-   wxMenu *mWaveTrackMenu;
-   size_t mChannelItemsInsertionPoint;
+   std::unique_ptr<wxMenu> mWaveTrackMenu;
+   size_t mChannelItemsInsertionPoint {};
 
-   wxMenu *mNoteTrackMenu;
-   wxMenu *mTimeTrackMenu;
-   wxMenu *mLabelTrackMenu;
-   wxMenu *mRateMenu;
-   wxMenu *mFormatMenu;
-   wxMenu *mLabelTrackInfoMenu;
+   std::unique_ptr<wxMenu>
+      mNoteTrackMenu, mTimeTrackMenu, mLabelTrackMenu,
+      mRulerWaveformMenu, mRulerSpectrumMenu;
 
-   wxMenu *mRulerWaveformMenu;
-   wxMenu *mRulerSpectrumMenu;
+   // These sub-menus are owned by parent menus,
+   // so not unique_ptrs
+   wxMenu *mRateMenu{}, *mFormatMenu{};
 
-   Track *mPopupMenuTarget;
+   Track *mPopupMenuTarget {};
 
    friend class TrackPanelAx;
 
-   TrackPanelAx *mAx;
+#if wxUSE_ACCESSIBILITY
+   TrackPanelAx *mAx{};
+#else
+   std::unique_ptr<TrackPanelAx> mAx;
+#endif
 
 public:
    TrackPanelAx &GetAx() { return *mAx; }

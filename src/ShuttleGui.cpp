@@ -107,6 +107,7 @@ for registering for changes.
 #include "Experimental.h"
 #include "Shuttle.h"
 #include "WrappedType.h"
+#include "widgets/wxPanelWrapper.h"
 
 ShuttleGuiBase::ShuttleGuiBase(wxWindow * pParent, teShuttleMode ShuttleMode )
 {
@@ -233,7 +234,7 @@ void ShuttleGuiBase::AddUnits(const wxString &Prompt)
    mpWind = safenew wxStaticText(GetParent(), -1, Prompt, wxDefaultPosition, wxDefaultSize,
       Style( wxALIGN_LEFT ));
    mpWind->SetName(Prompt); // fix for bug 577 (NVDA/Narrator screen readers do not read static text in dialogs)
-   UpdateSizersCore( false, wxALL | wxALIGN_LEFT );
+   UpdateSizersCore( false, wxALL | wxALIGN_CENTRE_VERTICAL );
 }
 
 /// Centred text string.
@@ -790,7 +791,7 @@ wxPanel * ShuttleGuiBase::StartPanel(int iStyle)
    if( mShuttleMode != eIsCreating )
       return wxDynamicCast(wxWindow::FindWindowById( miId, mpDlg), wxPanel);
    wxPanel * pPanel;
-   mpWind = pPanel = safenew wxPanel( GetParent(), miId, wxDefaultPosition, wxDefaultSize,
+   mpWind = pPanel = safenew wxPanelWrapper( GetParent(), miId, wxDefaultPosition, wxDefaultSize,
       Style( wxNO_BORDER ));
 
    if( iStyle != 0 )
@@ -847,7 +848,7 @@ wxNotebookPage * ShuttleGuiBase::StartNotebookPage( const wxString & Name )
       return NULL;
 //      return wxDynamicCast(wxWindow::FindWindowById( miId, mpDlg), wx);
    wxNotebook * pNotebook = (wxNotebook*)mpParent;
-   wxNotebookPage * pPage = safenew wxPanel(GetParent());
+   wxNotebookPage * pPage = safenew wxPanelWrapper(GetParent());
    pPage->SetName(Name);
 
    pNotebook->AddPage(
@@ -869,7 +870,7 @@ void ShuttleGuiBase::StartNotebookPage( const wxString & Name, wxNotebookPage * 
       return;
 //      return wxDynamicCast(wxWindow::FindWindowById( miId, mpDlg), wx);
    wxNotebook * pNotebook = (wxNotebook*)mpParent;
-//   wxNotebookPage * pPage = safenew wxPanel(GetParent());
+//   wxNotebookPage * pPage = safenew wxPanelWrapper(GetParent());
    pPage->Create( mpParent, wxID_ANY, wxDefaultPosition, wxDefaultSize, wxTAB_TRAVERSAL, wxT("panel"));
    pPage->SetName(Name);
 
@@ -895,7 +896,7 @@ void ShuttleGuiBase::EndNotebookPage()
 
 // Doxygen description is at the start of the file
 // this is a wxPanel with erase background disabled.
-class InvisiblePanel final : public wxPanel
+class InvisiblePanel final : public wxPanelWrapper
 {
 public:
    InvisiblePanel(
@@ -904,7 +905,7 @@ public:
       const wxPoint& pos = wxDefaultPosition,
       const wxSize& size = wxDefaultSize,
       long style = wxTAB_TRAVERSAL ) :
-      wxPanel( parent, id, pos, size, style )
+      wxPanelWrapper( parent, id, pos, size, style )
    {
    };
    ~InvisiblePanel(){;};
@@ -914,7 +915,7 @@ public:
 };
 
 
-BEGIN_EVENT_TABLE(InvisiblePanel, wxPanel)
+BEGIN_EVENT_TABLE(InvisiblePanel, wxPanelWrapper)
 //   EVT_PAINT(InvisiblePanel::OnPaint)
      EVT_ERASE_BACKGROUND( InvisiblePanel::OnErase)
 END_EVENT_TABLE()
@@ -932,7 +933,7 @@ wxPanel * ShuttleGuiBase::StartInvisiblePanel()
    if( mShuttleMode != eIsCreating )
       return wxDynamicCast(wxWindow::FindWindowById( miId, mpDlg), wxPanel);
    wxPanel * pPanel;
-   mpWind = pPanel = safenew wxPanel(GetParent(), miId, wxDefaultPosition, wxDefaultSize,
+   mpWind = pPanel = safenew wxPanelWrapper(GetParent(), miId, wxDefaultPosition, wxDefaultSize,
       wxNO_BORDER);
 
    mpWind->SetBackgroundColour(
@@ -2025,7 +2026,7 @@ ShuttleGui::ShuttleGui(wxWindow * pParent, teShuttleMode ShuttleMode) :
       return;
    }
 
-   mpShuttle = new ShuttlePrefs;
+   mpShuttle = std::make_unique<ShuttlePrefs>();
    // In this case the client is the GUI, so if creating we do want to
    // store in the client.
    mpShuttle->mbStoreInClient = (mShuttleMode == eIsCreating );
@@ -2033,8 +2034,6 @@ ShuttleGui::ShuttleGui(wxWindow * pParent, teShuttleMode ShuttleMode) :
 
 ShuttleGui::~ShuttleGui()
 {
-   if( mpShuttle )
-      delete mpShuttle;
 }
 
 // Now we have Audacity specific shuttle functions.
@@ -2053,7 +2052,7 @@ GuiWaveTrack * ShuttleGui::AddGuiWaveTrack( const wxString & WXUNUSED(Name))
 //      return wxDynamicCast(wxWindow::FindWindowById( miId, mpDlg), GuiWaveTrack);
    GuiWaveTrack * pGuiWaveTrack;
    miProp=1;
-   mpWind = pGuiWaveTrack = new GuiWaveTrack(mpParent, miId, Name);
+   mpWind = pGuiWaveTrack = safenew GuiWaveTrack(mpParent, miId, Name);
    mpWind->SetMinSize(wxSize(100,50));
    UpdateSizers();
    return pGuiWaveTrack;
@@ -2097,7 +2096,7 @@ AttachableScrollBar * ShuttleGui::AddAttachableScrollBar( long style )
 //      return wxDynamicCast(wxWindow::FindWindowById( miId, mpDlg), AttachableScrollBar);
    AttachableScrollBar * pAttachableScrollBar;
    miProp=0;
-   mpWind = pAttachableScrollBar = new AttachableScrollBar(
+   mpWind = pAttachableScrollBar = safenew AttachableScrollBar(
       mpParent,
       miId,
       wxDefaultPosition,

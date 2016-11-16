@@ -49,6 +49,7 @@ class SelectionBar final : public ToolBar {
    void SetSelectionFormat(const wxString & format);
    void SetRate(double rate);
    void SetListener(SelectionBarListener *l);
+   void RegenerateTooltips() override;
 
  private:
 
@@ -91,8 +92,8 @@ class SelectionBar final : public ToolBar {
 
  public:
 
-   DECLARE_CLASS(SelectionBar);
-   DECLARE_EVENT_TABLE();
+   DECLARE_CLASS(SelectionBar)
+   DECLARE_EVENT_TABLE()
 };
 
 #endif

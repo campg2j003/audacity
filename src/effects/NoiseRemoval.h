@@ -69,7 +69,7 @@ private:
 
    // Parameters chosen before the first phase
    double    mSampleRate;
-   int       mWindowSize;
+   size_t    mWindowSize;
    int       mSpectrumSize;
    float     mMinSignalTime;    // in secs
 
@@ -90,7 +90,7 @@ private:
 
    void Initialize();
    void StartNewTrack();
-   void ProcessSamples(sampleCount len, float *buffer);
+   void ProcessSamples(size_t len, float *buffer);
    void FillFirstHistoryWindow();
    void ApplyFreqSmoothing(float *spec);
    void GetProfile();

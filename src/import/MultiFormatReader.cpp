@@ -14,6 +14,8 @@ machine endianness representations.
 
 *//*******************************************************************/
 
+#include "MultiFormatReader.h"
+
 #include <exception>
 #include <stdexcept>
 #include <cstring>
@@ -22,7 +24,18 @@ machine endianness representations.
 
 #include <wx/defs.h>
 
-#include "MultiFormatReader.h"
+MachineEndianness::MachineEndianness()
+{
+   if (wxBYTE_ORDER == wxLITTLE_ENDIAN)
+   {
+      mFlag = MachineEndianness::Little;
+   }
+   else
+   {
+      mFlag = MachineEndianness::Big;
+   }
+}
+
 
 MultiFormatReader::MultiFormatReader(const char* filename)
    : mpFid(NULL)
@@ -106,6 +119,7 @@ size_t MultiFormatReader::Read(void* buffer, size_t size, size_t len, size_t str
       for (size_t n = 0; n < len; n++)
       {
          actRead += fread(&(pWork[n*size]), size, 1, mpFid);
+         // FIXME: TRAP_ERR fseek return in MultiFormatReader unchecked.
          fseek(mpFid, (stride - 1) * size, SEEK_CUR);
       }
    }

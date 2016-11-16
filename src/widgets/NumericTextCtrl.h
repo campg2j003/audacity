@@ -15,6 +15,7 @@
 #ifndef __AUDACITY_TIME_TEXT_CTRL__
 #define __AUDACITY_TIME_TEXT_CTRL__
 
+#include "../MemoryX.h"
 #include <wx/defs.h>
 #include <wx/dynarray.h>
 #include <wx/event.h>
@@ -65,9 +66,16 @@ public:
 
    virtual ~NumericConverter();
 
+   // ValueToControls() formats a raw value (either provided as
+   // argument, or mValue, depending on the version of the function
+   // called). The result is stored to mValueString.
    virtual void ValueToControls();
    virtual void ValueToControls(double rawValue, bool nearest = true);
+
+   // Converts the stored formatted string (mValueString) back to a
+   // raw value (mValue).
    virtual void ControlsToValue();
+
    virtual void ParseFormatString(const wxString & format);
 
    void PrintDebugInfo();
@@ -114,6 +122,7 @@ protected:
    wxString       mPrefix;
    wxString       mValueTemplate;
    wxString       mValueMask;
+   // Formatted mValue, by ValueToControls().
    wxString       mValueString;
 
    double         mScalingFactor;
@@ -133,7 +142,7 @@ class NumericTextCtrl final : public wxControl, public NumericConverter
    friend class NumericTextCtrlAx;
 
  public:
-   DECLARE_DYNAMIC_CLASS(NumericTextCtrl);
+   DECLARE_DYNAMIC_CLASS(NumericTextCtrl)
 
    NumericTextCtrl(NumericConverter::Type type,
                    wxWindow *parent,
@@ -155,12 +164,12 @@ class NumericTextCtrl final : public wxControl, public NumericConverter
    void SetFormatString(const wxString & formatString);
    void SetFormatName(const wxString & formatName);
 
-   void SetFieldFocus(int digit);
+   void SetFieldFocus(int /* digit */);
 
    void SetReadOnly(bool readOnly = true);
    void EnableMenu(bool enable = true);
 
-   // The text control permits typing '-' to make the value invalid only if this
+   // The text control permits typing DELETE to make the value invalid only if this
    // function has previously been called.
    // Maybe you want something other than the default of -1 to indicate the invalid value
    // this control returns to the program, so you can specify.
@@ -180,6 +189,9 @@ private:
    void OnFocus(wxFocusEvent &event);
    void OnContext(wxContextMenuEvent &event);
 
+   // Formats mValue into mValueString, using the method of the base class.
+   // Triggers a refresh of the wx window only when the value actually
+   // changed since last time a refresh was triggered.
    void ValueToControls() override;
    void ControlsToValue() override;
 
@@ -193,10 +205,9 @@ private:
    bool           mMenuEnabled;
    bool           mReadOnly;
 
-   wxBitmap      *mBackgroundBitmap;
+   std::unique_ptr<wxBitmap> mBackgroundBitmap;
 
-   wxFont        *mDigitFont;
-   wxFont        *mLabelFont;
+   std::unique_ptr<wxFont> mDigitFont, mLabelFont;
    int            mDigitBoxW;
    int            mDigitBoxH;
    int            mDigitW;

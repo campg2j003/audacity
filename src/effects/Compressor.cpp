@@ -57,7 +57,7 @@ enum
 //     Name          Type     Key                  Def      Min      Max      Scale
 Param( Threshold,    double,  XO("Threshold"),     -12.0,   -60.0,   -1.0,    1   );
 Param( NoiseFloor,   double,  XO("NoiseFloor"),    -40.0,   -80.0,   -20.0,   5   );
-Param( Ratio,        double,  XO("Ratio"),         2.0,     1.5,     10.0,    2   );
+Param( Ratio,        double,  XO("Ratio"),         2.0,     1.1,     10.0,    10  );
 Param( AttackTime,   double,  XO("AttackTime"),    0.2,     0.1,     5.0,     100 );
 Param( ReleaseTime,  double,  XO("ReleaseTime"),   1.0,     1.0,     30.0,    10  );
 Param( Normalize,    bool,    XO("Normalize"),     true,    false,   true,    1   );
@@ -250,6 +250,7 @@ void EffectCompressor::PopulateOrExchange(ShuttleGui & S)
                                                  MAX_Ratio * SCL_Ratio,
                                                  MIN_Ratio * SCL_Ratio);
          mRatioSlider->SetName(_("Ratio"));
+         mRatioSlider->SetPageSize(5);
          mRatioText = S.AddVariableText(wxT("XXXX:1"), true,
                                              wxALIGN_LEFT | wxALIGN_CENTER_VERTICAL);
 
@@ -365,13 +366,11 @@ bool EffectCompressor::InitPass1()
       DisableSecondPass();
 
    // Find the maximum block length required for any track
-   sampleCount maxlen=0;
+   size_t maxlen = 0;
    SelectedTrackListOfKindIterator iter(Track::Wave, mTracks);
    WaveTrack *track = (WaveTrack *) iter.First();
    while (track) {
-      sampleCount len=track->GetMaxBlockSize();
-      if(len > maxlen)
-         maxlen = len;
+      maxlen = std::max(maxlen, track->GetMaxBlockSize());
       //Iterate to the next track
       track = (WaveTrack *) iter.Next();
    }
@@ -403,7 +402,8 @@ bool EffectCompressor::InitPass2()
 // Process the input with 2 buffers available at a time
 // buffer1 will be written upon return
 // buffer2 will be passed as buffer1 on the next call
-bool EffectCompressor::TwoBufferProcessPass1(float *buffer1, sampleCount len1, float *buffer2, sampleCount len2)
+bool EffectCompressor::TwoBufferProcessPass1
+   (float *buffer1, size_t len1, float *buffer2, size_t len2)
 {
    int i;
 
@@ -449,7 +449,7 @@ bool EffectCompressor::TwoBufferProcessPass1(float *buffer1, sampleCount len1, f
    return true;
 }
 
-bool EffectCompressor::ProcessPass2(float *buffer, sampleCount len)
+bool EffectCompressor::ProcessPass2(float *buffer, size_t len)
 {
    if (mMax != 0)
    {
@@ -484,7 +484,7 @@ float EffectCompressor::AvgCircle(float value)
    return level;
 }
 
-void EffectCompressor::Follow(float *buffer, float *env, int len, float *previous, int previous_len)
+void EffectCompressor::Follow(float *buffer, float *env, size_t len, float *previous, size_t previous_len)
 {
    /*
 
@@ -554,7 +554,7 @@ void EffectCompressor::Follow(float *buffer, float *env, int len, float *previou
 
    // Next do the same process in reverse direction to get the requested attack rate
    last = mLastLevel;
-   for(i=len-1; i>=0; i--) {
+   for(i = len; i--;) {
       last *= mAttackInverseFactor;
       if(last < mThreshold)
          last = mThreshold;
@@ -566,7 +566,7 @@ void EffectCompressor::Follow(float *buffer, float *env, int len, float *previou
 
    if((previous != NULL) && (previous_len > 0)) {
       // If the previous envelope was passed, propagate the rise back until we intersect
-      for(i=previous_len-1; i>0; i--) {
+      for(i = previous_len; i--;) {
          last *= mAttackInverseFactor;
          if(last < mThreshold)
             last = mThreshold;
@@ -633,7 +633,7 @@ void EffectCompressor::UpdateUI()
    mNoiseFloorText->SetLabel(wxString::Format(_("%3d dB"), (int) mNoiseFloorDB));
    mNoiseFloorText->SetName(mNoiseFloorText->GetLabel()); // fix for bug 577 (NVDA/Narrator screen readers do not read static text in dialogs)
 
-   if (mRatioSlider->GetValue() % 2 == 0) {
+   if (mRatioSlider->GetValue() % 10 == 0) {
       mRatioLabel->SetName(wxString::Format(_("Ratio %.0f to 1"), mRatio));
       /* i18n-hint: Unless your language has a different convention for ratios,
        * like 8:1, leave as is.*/
@@ -664,7 +664,7 @@ void EffectCompressor::UpdateUI()
 // EffectCompressorPanel
 //----------------------------------------------------------------------------
 
-BEGIN_EVENT_TABLE(EffectCompressorPanel, wxPanel)
+BEGIN_EVENT_TABLE(EffectCompressorPanel, wxPanelWrapper)
    EVT_PAINT(EffectCompressorPanel::OnPaint)
    EVT_SIZE(EffectCompressorPanel::OnSize)
 END_EVENT_TABLE()
@@ -673,7 +673,7 @@ EffectCompressorPanel::EffectCompressorPanel(wxWindow *parent,
                                              double & threshold,
                                              double & noiseFloor,
                                              double & ratio)
-:  wxPanel(parent),
+:  wxPanelWrapper(parent),
    threshold(threshold),
    noiseFloor(noiseFloor),
    ratio(ratio)

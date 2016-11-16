@@ -159,7 +159,7 @@ bool EffectNormalize::Process()
    //Iterate over each track
    this->CopyInputTracks(); // Set up mOutputTracks.
    bool bGoodResult = true;
-   SelectedTrackListOfKindIterator iter(Track::Wave, mOutputTracks);
+   SelectedTrackListOfKindIterator iter(Track::Wave, mOutputTracks.get());
    WaveTrack *track = (WaveTrack *) iter.First();
    WaveTrack *prevTrack;
    prevTrack = track;
@@ -364,7 +364,6 @@ void EffectNormalize::AnalyseTrack(WaveTrack * track, const wxString &msg)
 bool EffectNormalize::AnalyseDC(WaveTrack * track, const wxString &msg)
 {
    bool rc = true;
-   sampleCount s;
 
    mOffset = 0.0; // we might just return
 
@@ -372,13 +371,13 @@ bool EffectNormalize::AnalyseDC(WaveTrack * track, const wxString &msg)
       return(rc);
 
    //Transform the marker timepoints to samples
-   sampleCount start = track->TimeToLongSamples(mCurT0);
-   sampleCount end = track->TimeToLongSamples(mCurT1);
+   auto start = track->TimeToLongSamples(mCurT0);
+   auto end = track->TimeToLongSamples(mCurT1);
 
    //Get the length of the buffer (as double). len is
    //used simply to calculate a progress meter, so it is easier
    //to make it a double now than it is to do it later
-   double len = (double)(end - start);
+   auto len = (end - start).as_double();
 
    //Initiate a processing buffer.  This buffer will (most likely)
    //be shorter than the length of the track being processed.
@@ -389,14 +388,14 @@ bool EffectNormalize::AnalyseDC(WaveTrack * track, const wxString &msg)
 
    //Go through the track one buffer at a time. s counts which
    //sample the current buffer starts at.
-   s = start;
+   auto s = start;
    while (s < end) {
       //Get a block of samples (smaller than the size of the buffer)
-      sampleCount block = track->GetBestBlockSize(s);
-
       //Adjust the block size if it is the final block in the track
-      if (s + block > end)
-         block = end - s;
+      const auto block = limitSampleBufferSize(
+         track->GetBestBlockSize(s),
+         end - s
+      );
 
       //Get the samples from the track and put them in the buffer
       track->Get((samplePtr) buffer, floatSample, s, block);
@@ -409,7 +408,7 @@ bool EffectNormalize::AnalyseDC(WaveTrack * track, const wxString &msg)
 
       //Update the Progress meter
       if (TrackProgress(mCurTrackNum,
-                        ((double)(s - start) / len)/2.0, msg)) {
+                        ((s - start).as_double() / len)/2.0, msg)) {
          rc = false; //lda .. break, not return, so that buffer is deleted
          break;
       }
@@ -418,7 +417,7 @@ bool EffectNormalize::AnalyseDC(WaveTrack * track, const wxString &msg)
    //Clean up the buffer
    delete[] buffer;
 
-   mOffset = (float)(-mSum / mCount);  // calculate actual offset (amount that needs to be added on)
+   mOffset = -mSum / mCount.as_double();  // calculate actual offset (amount that needs to be added on)
 
    //Return true because the effect processing succeeded ... unless cancelled
    return rc;
@@ -430,16 +429,15 @@ bool EffectNormalize::AnalyseDC(WaveTrack * track, const wxString &msg)
 bool EffectNormalize::ProcessOne(WaveTrack * track, const wxString &msg)
 {
    bool rc = true;
-   sampleCount s;
 
    //Transform the marker timepoints to samples
-   sampleCount start = track->TimeToLongSamples(mCurT0);
-   sampleCount end = track->TimeToLongSamples(mCurT1);
+   auto start = track->TimeToLongSamples(mCurT0);
+   auto end = track->TimeToLongSamples(mCurT1);
 
    //Get the length of the buffer (as double). len is
    //used simply to calculate a progress meter, so it is easier
    //to make it a double now than it is to do it later
-   double len = (double)(end - start);
+   auto len = (end - start).as_double();
 
    //Initiate a processing buffer.  This buffer will (most likely)
    //be shorter than the length of the track being processed.
@@ -447,14 +445,14 @@ bool EffectNormalize::ProcessOne(WaveTrack * track, const wxString &msg)
 
    //Go through the track one buffer at a time. s counts which
    //sample the current buffer starts at.
-   s = start;
+   auto s = start;
    while (s < end) {
       //Get a block of samples (smaller than the size of the buffer)
-      sampleCount block = track->GetBestBlockSize(s);
-
       //Adjust the block size if it is the final block in the track
-      if (s + block > end)
-         block = end - s;
+      const auto block = limitSampleBufferSize(
+         track->GetBestBlockSize(s),
+         end - s
+      );
 
       //Get the samples from the track and put them in the buffer
       track->Get((samplePtr) buffer, floatSample, s, block);
@@ -470,7 +468,7 @@ bool EffectNormalize::ProcessOne(WaveTrack * track, const wxString &msg)
 
       //Update the Progress meter
       if (TrackProgress(mCurTrackNum,
-                        0.5+((double)(s - start) / len)/2.0, msg)) {
+                        0.5+((s - start).as_double() / len)/2.0, msg)) {
          rc = false; //lda .. break, not return, so that buffer is deleted
          break;
       }
@@ -482,20 +480,16 @@ bool EffectNormalize::ProcessOne(WaveTrack * track, const wxString &msg)
    return rc;
 }
 
-void EffectNormalize::AnalyzeData(float *buffer, sampleCount len)
+void EffectNormalize::AnalyzeData(float *buffer, size_t len)
 {
-   sampleCount i;
-
-   for(i=0; i<len; i++)
+   for(decltype(len) i = 0; i < len; i++)
       mSum += (double)buffer[i];
    mCount += len;
 }
 
-void EffectNormalize::ProcessData(float *buffer, sampleCount len)
+void EffectNormalize::ProcessData(float *buffer, size_t len)
 {
-   sampleCount i;
-
-   for(i=0; i<len; i++) {
+   for(decltype(len) i = 0; i < len; i++) {
       float adjFrame = (buffer[i] + mOffset) * mMult;
       buffer[i] = adjFrame;
    }

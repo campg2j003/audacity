@@ -41,8 +41,8 @@ class AudacityProject;
 class ZoomInfo;
 
 WX_DEFINE_USER_EXPORTED_ARRAY(Track*, TrackArray, class AUDACITY_DLL_API);
-class WaveTrackArray : public std::vector < WaveTrack* > {
-};
+using WaveTrackArray = std::vector < WaveTrack* > ;
+
 class WaveTrackConstArray : public std::vector < const WaveTrack* > {
 public:
    WaveTrackConstArray() {}
@@ -143,7 +143,7 @@ class AUDACITY_DLL_API Track /* not final */ : public XMLTagHandler
    bool                mMute;
    bool                mSolo;
 
-   mutable DirManager *mDirManager;
+   mutable std::shared_ptr<DirManager> mDirManager;
 
  public:
 #ifdef EXPERIMENTAL_OUTPUT_DISPLAY
@@ -169,7 +169,7 @@ class AUDACITY_DLL_API Track /* not final */ : public XMLTagHandler
       All
    };
 
-   Track(DirManager * projDirManager);
+   Track(const std::shared_ptr<DirManager> &projDirManager);
    Track(const Track &orig);
 
    virtual ~ Track();
@@ -210,12 +210,12 @@ class AUDACITY_DLL_API Track /* not final */ : public XMLTagHandler
    // mostly to support "Duplicate" of const objects,
    // but in general, mucking with the dir manager is
    // separate from the Track.
-   DirManager* GetDirManager() const { return mDirManager; }
+   const std::shared_ptr<DirManager> &GetDirManager() const { return mDirManager; }
 
-   // Create a new track and modify this track (or return null for failure)
+   // Create a NEW track and modify this track (or return null for failure)
    virtual Holder Cut(double WXUNUSED(t0), double WXUNUSED(t1)) { return{}; }
 
-   // Create a new track and don't modify this track (or return null for failure)
+   // Create a NEW track and don't modify this track (or return null for failure)
    virtual Holder Copy(double WXUNUSED(t0), double WXUNUSED(t1)) const { return{}; }
 
    // Return true for success
@@ -382,6 +382,7 @@ class AUDACITY_DLL_API SyncLockedTracksIterator final : public TrackListIterator
    Track *Last(bool skiplinked = false) override;
 
  private:
+   bool IsGoodNextTrack(const Track *t) const;
    bool mInLabelSection;
 };
 
@@ -448,7 +449,7 @@ class TrackList final : public wxEvtHandler, public ListOfTracks
    TrackNodePointer Remove(Track *t);
 
    /// Make the list empty
-   void Clear();
+   void Clear(bool sendEvent = true);
 
    /** Select a track, and if it is linked to another track, select it, too. */
    void Select(Track * t, bool selected = true);
@@ -482,7 +483,7 @@ class TrackList final : public wxEvtHandler, public ListOfTracks
    * Mono, Stereo etc. @param selectionOnly Whether to consider the entire track
    * list or only the selected members of it
    */
-   int GetNumExportChannels(bool selectionOnly) const;
+   unsigned GetNumExportChannels(bool selectionOnly) const;
 
    WaveTrackArray GetWaveTrackArray(bool selectionOnly, bool includeMuted = true);
    WaveTrackConstArray GetWaveTrackConstArray(bool selectionOnly, bool includeMuted = true) const;
@@ -529,13 +530,13 @@ private:
 class AUDACITY_DLL_API TrackFactory
 {
  private:
-   TrackFactory(DirManager *dirManager, const ZoomInfo *zoomInfo):
+   TrackFactory(const std::shared_ptr<DirManager> &dirManager, const ZoomInfo *zoomInfo):
       mDirManager(dirManager)
       , mZoomInfo(zoomInfo)
    {
    }
 
-   DirManager *const mDirManager;
+   const std::shared_ptr<DirManager> mDirManager;
    const ZoomInfo *const mZoomInfo;
    friend class AudacityProject;
    friend class BenchmarkDialog;

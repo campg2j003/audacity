@@ -99,19 +99,19 @@ EffectType EffectAmplify::GetType()
 
 // EffectClientInterface implementation
 
-int EffectAmplify::GetAudioInCount()
+unsigned EffectAmplify::GetAudioInCount()
 {
    return 1;
 }
 
-int EffectAmplify::GetAudioOutCount()
+unsigned EffectAmplify::GetAudioOutCount()
 {
    return 1;
 }
 
-sampleCount EffectAmplify::ProcessBlock(float **inBlock, float **outBlock, sampleCount blockLen)
+size_t EffectAmplify::ProcessBlock(float **inBlock, float **outBlock, size_t blockLen)
 {
-   for (sampleCount i = 0; i < blockLen; i++)
+   for (decltype(blockLen) i = 0; i < blockLen; i++)
    {
       outBlock[0][i] = inBlock[0][i] * mRatio;
    }

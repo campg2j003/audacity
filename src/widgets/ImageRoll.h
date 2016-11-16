@@ -16,8 +16,8 @@
 #include <wx/dcclient.h>
 #include <wx/defs.h>
 #include <wx/dynarray.h>
-#include <wx/panel.h>
 #include <wx/version.h>
+#include "wxPanelWrapper.h"
 
 #if !wxCHECK_VERSION(3,0,0)
 #define wxRasterOperationMode int
@@ -67,10 +67,10 @@ class ImageRoll
 
 // A very simple class that just display an ImageRoll that doesn't
 // do anything
-class ImageRollPanel final : public wxPanel
+class ImageRollPanel final : public wxPanelWrapper
 {
  public:
-   DECLARE_DYNAMIC_CLASS(ImageRollPanel);
+   DECLARE_DYNAMIC_CLASS(ImageRollPanel)
 
    ImageRollPanel(wxWindow *parent,
                   wxWindowID id,
@@ -89,7 +89,7 @@ class ImageRollPanel final : public wxPanel
 
    wxRasterOperationMode mLogicalFunction;
 
-   DECLARE_EVENT_TABLE();
+   DECLARE_EVENT_TABLE()
 
 };
 

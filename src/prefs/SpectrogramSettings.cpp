@@ -237,10 +237,10 @@ bool SpectrogramSettings::Validate(bool quiet)
       std::max(0, std::min(NumWindowFuncs() - 1, windowType));
    scaleType =
       ScaleType(std::max(0,
-         std::min(int(SpectrogramSettings::stNumScaleTypes) - 1,
-            int(scaleType))));
+         std::min((int)(SpectrogramSettings::stNumScaleTypes) - 1,
+            (int)(scaleType))));
    algorithm = Algorithm(
-      std::max(0, std::min(int(algNumAlgorithms) - 1, int(algorithm)))
+      std::max(0, std::min((int)(algNumAlgorithms) - 1, (int)(algorithm)))
    );
    ConvertToEnumeratedWindowSizes();
    ConvertToActualWindowSizes();
@@ -348,7 +348,6 @@ SpectrogramSettings::~SpectrogramSettings()
 
 void SpectrogramSettings::DestroyWindows()
 {
-#ifdef EXPERIMENTAL_USE_REALFFTF
    if (hFFT != NULL) {
       EndFFT(hFFT);
       hFFT = NULL;
@@ -365,7 +364,6 @@ void SpectrogramSettings::DestroyWindows()
       delete[] tWindow;
       tWindow = NULL;
    }
-#endif
 }
 
 
@@ -373,8 +371,8 @@ namespace
 {
    enum { WINDOW, TWINDOW, DWINDOW };
    void RecreateWindow(
-      float *&window, int which, int fftLen,
-      int padding, int windowType, int windowSize, double &scale)
+      float *&window, int which, size_t fftLen,
+      size_t padding, int windowType, size_t windowSize, double &scale)
    {
       if (window != NULL)
          delete[] window;
@@ -404,7 +402,7 @@ namespace
          // Future, reassignment
       case TWINDOW:
          NewWindowFunc(windowType, windowSize, extra, window + padding);
-         for (int ii = padding, multiplier = -windowSize / 2; ii < endOfWindow; ++ii, ++multiplier)
+         for (int ii = padding, multiplier = -(int)windowSize / 2; ii < endOfWindow; ++ii, ++multiplier)
             window[ii] *= multiplier;
          break;
       case DWINDOW:
@@ -428,12 +426,11 @@ namespace
 
 void SpectrogramSettings::CacheWindows() const
 {
-#ifdef EXPERIMENTAL_USE_REALFFTF
    if (hFFT == NULL || window == NULL) {
 
       double scale;
-      const int fftLen = windowSize * zeroPaddingFactor;
-      const int padding = (windowSize * (zeroPaddingFactor - 1)) / 2;
+      const auto fftLen = WindowSize() * ZeroPaddingFactor();
+      const auto padding = (windowSize * (zeroPaddingFactor - 1)) / 2;
 
       if (hFFT != NULL)
          EndFFT(hFFT);
@@ -444,7 +441,6 @@ void SpectrogramSettings::CacheWindows() const
          RecreateWindow(dWindow, DWINDOW, fftLen, padding, windowType, windowSize, scale);
       }
    }
-#endif // EXPERIMENTAL_USE_REALFFTF
 }
 
 void SpectrogramSettings::ConvertToEnumeratedWindowSizes()
@@ -479,7 +475,7 @@ void SpectrogramSettings::ConvertToActualWindowSizes()
 #endif
 }
 
-int SpectrogramSettings::GetFFTLength() const
+size_t SpectrogramSettings::GetFFTLength() const
 {
    return windowSize
 #ifdef EXPERIMENTAL_ZERO_PADDED_SPECTROGRAMS
@@ -492,7 +488,7 @@ NumberScale SpectrogramSettings::GetScale
 (float minFreq, float maxFreq, double rate, bool bins) const
 {
    NumberScaleType type = nstLinear;
-   const int half = GetFFTLength() / 2;
+   const auto half = GetFFTLength() / 2;
 
    // Don't assume the correspondence of the enums will remain direct in the future.
    // Do this switch.

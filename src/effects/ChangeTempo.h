@@ -16,6 +16,11 @@
 #ifndef __AUDACITY_EFFECT_CHANGETEMPO__
 #define __AUDACITY_EFFECT_CHANGETEMPO__
 
+#if USE_SBSMS
+#include "SBSMSEffect.h"
+#include <wx/checkbox.h>
+#endif
+
 #include <wx/event.h>
 #include <wx/slider.h>
 #include <wx/string.h>
@@ -75,6 +80,7 @@ private:
    void Update_Text_ToLength(); // Use m_FromLength & m_PercentChange to set NEW m_ToLength & control.
 
 private:
+   bool           mUseSBSMS;
    double         m_PercentChange;  // percent change to apply to tempo
                                     // -100% is meaningless, but sky's the upper limit
    double         m_FromBPM;        // user-set beats-per-minute. Zero means not yet set.
@@ -92,7 +98,11 @@ private:
    wxTextCtrl *	m_pTextCtrl_FromLength;
    wxTextCtrl *	m_pTextCtrl_ToLength;
 
-   DECLARE_EVENT_TABLE();
+#if USE_SBSMS
+   wxCheckBox *   mUseSBSMSCheckBox;
+#endif
+
+   DECLARE_EVENT_TABLE()
 };
 
 #endif // __AUDACITY_EFFECT_CHANGETEMPO__

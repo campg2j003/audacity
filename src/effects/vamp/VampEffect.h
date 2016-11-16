@@ -35,7 +35,7 @@ class LabelTrack;
 class VampEffect final : public Effect
 {
 public:
-   VampEffect(Vamp::Plugin *plugin,
+   VampEffect(std::unique_ptr<Vamp::Plugin> &&plugin,
               const wxString & path,
               int output,
               bool hasParameters);
@@ -59,7 +59,7 @@ public:
 
    // EffectClientInterface implementation
 
-   int GetAudioInCount() override;
+   unsigned GetAudioInCount() override;
    bool GetAutomationParameters(EffectAutomationParameters & parms) override;
    bool SetAutomationParameters(EffectAutomationParameters & parms) override;
 
@@ -85,7 +85,7 @@ private:
    void OnTextCtrl(wxCommandEvent & evt);
 
 private:
-   Vamp::Plugin *mPlugin;
+   std::unique_ptr<Vamp::Plugin> mPlugin;
    wxString mPath;
    int mOutput;
    bool mHasParameters;
@@ -108,7 +108,7 @@ private:
    wxChoice **mChoices;
    wxChoice *mProgram;
 
-   DECLARE_EVENT_TABLE();
+   DECLARE_EVENT_TABLE()
 };
 
 #endif

@@ -40,44 +40,41 @@ wxString GetFFmpegVersion(wxWindow *parent)
 
 /** This pointer to the shared object has global scope and is used to track the
  * singleton object which wraps the FFmpeg codecs */
-FFmpegLibs *FFmpegLibsInst = NULL;
+std::unique_ptr<FFmpegLibs> FFmpegLibsPtr{};
+FFmpegLibs *FFmpegLibsInst()
+{
+   return FFmpegLibsPtr.get();
+}
 
 FFmpegLibs *PickFFmpegLibs()
 {
-   if (FFmpegLibsInst != NULL)
-   {
-      FFmpegLibsInst->refcount++;
-      return FFmpegLibsInst;
-   }
+   if (FFmpegLibsPtr)
+      FFmpegLibsPtr->refcount++;
    else
-   {
-      FFmpegLibsInst = new FFmpegLibs();
-      return FFmpegLibsInst;
-   }
+      FFmpegLibsPtr = std::make_unique<FFmpegLibs>();
+
+   return FFmpegLibsPtr.get();
 }
 
 void DropFFmpegLibs()
 {
-   if (FFmpegLibsInst != NULL)
+   if (FFmpegLibsPtr)
    {
-      FFmpegLibsInst->refcount--;
-      if (FFmpegLibsInst->refcount == 0)
-      {
-         delete FFmpegLibsInst;
-         FFmpegLibsInst = NULL;
-      }
+      FFmpegLibsPtr->refcount--;
+      if (FFmpegLibsPtr->refcount == 0)
+         FFmpegLibsPtr.reset();
    }
 }
 
 bool LoadFFmpeg(bool showerror)
 {
    PickFFmpegLibs();
-   if (FFmpegLibsInst->ValidLibsLoaded())
+   if (FFmpegLibsInst()->ValidLibsLoaded())
    {
       DropFFmpegLibs();
       return true;
    }
-   if (!FFmpegLibsInst->LoadLibs(NULL,showerror))
+   if (!FFmpegLibsInst()->LoadLibs(NULL, showerror))
    {
       DropFFmpegLibs();
       gPrefs->Write(wxT("/FFmpeg/Enabled"), false);
@@ -116,8 +113,8 @@ wxString GetFFmpegVersion(wxWindow * WXUNUSED(parent))
 
    wxString versionString = _("FFmpeg library not found");
 
-   if (FFmpegLibsInst->ValidLibsLoaded()) {
-      versionString = FFmpegLibsInst->GetLibraryVersion();
+   if (FFmpegLibsInst()->ValidLibsLoaded()) {
+      versionString = FFmpegLibsInst()->GetLibraryVersion();
    }
 
    DropFFmpegLibs();
@@ -295,7 +292,7 @@ fail:
 
 FFmpegContext::~FFmpegContext()
 {
-   if (FFmpegLibsInst->ValidLibsLoaded())
+   if (FFmpegLibsInst()->ValidLibsLoaded())
    {
       if (ic_ptr)
          avformat_close_input(&ic_ptr);
@@ -304,7 +301,7 @@ FFmpegContext::~FFmpegContext()
 
    if (pb) {
       ufile_close(pb);
-      if (FFmpegLibsInst->ValidLibsLoaded())
+      if (FFmpegLibsInst()->ValidLibsLoaded())
       {
          av_free(pb->buffer);
          av_free(pb);
@@ -449,12 +446,12 @@ class FFmpegNotFoundDialog;
 #define ID_FFMPEG_DLOAD  5001
 
 /// Allows user to locate libav* libraries
-class FindFFmpegDialog final : public wxDialog
+class FindFFmpegDialog final : public wxDialogWrapper
 {
 public:
 
    FindFFmpegDialog(wxWindow *parent, const wxString &path, const wxString &name, const wxString &type)
-      :  wxDialog(parent, wxID_ANY, wxString(_("Locate FFmpeg")))
+      :  wxDialogWrapper(parent, wxID_ANY, wxString(_("Locate FFmpeg")))
    {
       SetName(GetTitle());
       ShuttleGui S(this, eIsCreating);
@@ -558,7 +555,7 @@ private:
    DECLARE_EVENT_TABLE()
 };
 
-BEGIN_EVENT_TABLE(FindFFmpegDialog, wxDialog)
+BEGIN_EVENT_TABLE(FindFFmpegDialog, wxDialogWrapper)
    EVT_BUTTON(ID_FFMPEG_BROWSE, FindFFmpegDialog::OnBrowse)
    EVT_BUTTON(ID_FFMPEG_DLOAD,  FindFFmpegDialog::OnDownload)
 END_EVENT_TABLE()
@@ -568,7 +565,7 @@ END_EVENT_TABLE()
 // FFmpegNotFoundDialog
 //----------------------------------------------------------------------------
 
-BEGIN_EVENT_TABLE(FFmpegNotFoundDialog, wxDialog)
+BEGIN_EVENT_TABLE(FFmpegNotFoundDialog, wxDialogWrapper)
    EVT_BUTTON(wxID_OK, FFmpegNotFoundDialog::OnOk)
 END_EVENT_TABLE()
 
@@ -581,7 +578,6 @@ FFmpegLibs::FFmpegLibs()
 {
    mLibsLoaded = false;
    refcount = 1;
-   avformat = avcodec = avutil = NULL;
    if (gPrefs) {
       mLibAVFormatPath = gPrefs->Read(wxT("/FFmpeg/FFmpegLibPath"), wxT(""));
    }
@@ -780,7 +776,7 @@ bool FFmpegLibs::InitLibs(const wxString &libpath_format, bool WXUNUSED(showerr)
    bool gotError = false;
 
    // Check for a monolithic avformat
-   avformat = new wxDynamicLibrary();
+   avformat = std::make_unique<wxDynamicLibrary>();
    wxLogMessage(wxT("Checking for monolithic avformat from '%s'."), nameFull.c_str());
    gotError = !avformat->Load(nameFull, wxDL_LAZY);
 
@@ -790,8 +786,8 @@ bool FFmpegLibs::InitLibs(const wxString &libpath_format, bool WXUNUSED(showerr)
       avcodec_filename = FileNames::PathFromAddr(avformat->GetSymbol(wxT("avcodec_version")));
       if (avutil_filename.GetFullPath().IsSameAs(nameFull)) {
          if (avcodec_filename.GetFullPath().IsSameAs(nameFull)) {
-            util = avformat;
-            codec = avformat;
+            util = avformat.get();
+            codec = avformat.get();
          }
       }
       if (!avcodec_filename.FileExists()) {
@@ -817,13 +813,13 @@ bool FFmpegLibs::InitLibs(const wxString &libpath_format, bool WXUNUSED(showerr)
    const wxString avutil_filename_full{ avutil_filename.GetFullPath() };
 
    if (!util) {
-      avutil = util = new wxDynamicLibrary();
+      util = (avutil = std::make_unique<wxDynamicLibrary>()).get();
       wxLogMessage(wxT("Loading avutil from '%s'."), avutil_filename_full.c_str());
       util->Load(avutil_filename_full, wxDL_LAZY);
    }
 
    if (!codec) {
-      avcodec = codec = new wxDynamicLibrary();
+      codec = (avcodec = std::make_unique<wxDynamicLibrary>()).get();
       wxLogMessage(wxT("Loading avcodec from '%s'."), avcodec_filename_full.c_str());
       codec->Load(avcodec_filename_full, wxDL_LAZY);
    }
@@ -946,9 +942,9 @@ bool FFmpegLibs::InitLibs(const wxString &libpath_format, bool WXUNUSED(showerr)
                   avuver,mAVUtilVersion.c_str(), LIBAVUTIL_VERSION_INT,
                   wxString::FromUTF8(AV_STRINGIFY(LIBAVUTIL_VERSION)).c_str());
 
-   int avcverdiff = (avcver >> 16 & 0xFF) - int(LIBAVCODEC_VERSION_MAJOR);
-   int avfverdiff = (avfver >> 16 & 0xFF) - int(LIBAVFORMAT_VERSION_MAJOR);
-   int avuverdiff = (avuver >> 16 & 0xFF) - int(LIBAVUTIL_VERSION_MAJOR);
+   int avcverdiff = (avcver >> 16 & 0xFF) - (int)(LIBAVCODEC_VERSION_MAJOR);
+   int avfverdiff = (avfver >> 16 & 0xFF) - (int)(LIBAVFORMAT_VERSION_MAJOR);
+   int avuverdiff = (avuver >> 16 & 0xFF) - (int)(LIBAVUTIL_VERSION_MAJOR);
    if (avcverdiff != 0)
       wxLogError(wxT("AVCodec version mismatch = %d"), avcverdiff);
    if (avfverdiff != 0)
@@ -967,23 +963,10 @@ bool FFmpegLibs::InitLibs(const wxString &libpath_format, bool WXUNUSED(showerr)
 
 void FFmpegLibs::FreeLibs()
 {
-   if (avformat != NULL) {
-      delete avformat;
-      avformat = NULL;
-   }
-
-   if (avcodec != NULL) {
-      delete avcodec;
-      avcodec = NULL;
-   }
-
-   if (avutil != NULL) {
-      delete avutil;
-      avutil = NULL;
-   }
-
+   avformat.reset();
+   avcodec.reset();
+   avutil.reset();
    mLibsLoaded = false;
-
    return;
 }
 

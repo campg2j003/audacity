@@ -17,7 +17,6 @@
 #define __AUDACITY_METER__
 
 #include <wx/defs.h>
-#include <wx/panel.h>
 #include <wx/timer.h>
 
 #include "../SampleFormat.h"
@@ -86,7 +85,7 @@ class MeterUpdateQueue
 
 class MeterAx;
 
-class Meter final : public wxPanel
+class Meter final : public wxPanelWrapper
 {
    DECLARE_DYNAMIC_CLASS(Meter)
 
@@ -113,8 +112,10 @@ class Meter final : public wxPanel
 
    ~Meter();
 
-   bool AcceptsFocus() const override { return false; };
-   bool AcceptsFocusFromKeyboard() const override { return true; };
+   bool AcceptsFocus() const override { return s_AcceptsFocus; }
+   bool AcceptsFocusFromKeyboard() const override { return true; }
+
+   void SetFocusFromKbd() override;
 
    void UpdatePrefs();
    void Clear();
@@ -152,7 +153,7 @@ class Meter final : public wxPanel
     *
     * The second overload is for ease of use in MixerBoard.
     */
-   void UpdateDisplay(int numChannels,
+   void UpdateDisplay(unsigned numChannels,
                       int numFrames, float *sampleData);
 
    // Vaughan, 2010-11-29: This not currently used. See comments in MixerTrackCluster::UpdateMeter().
@@ -160,7 +161,7 @@ class Meter final : public wxPanel
    //                     // Need to make these double-indexed max and min arrays if we handle more than 2 channels.
    //                     float* maxLeft, float* rmsLeft,
    //                     float* maxRight, float* rmsRight,
-   //                     const sampleCount kSampleCount);
+   //                     const size_t kSampleCount);
 
    /** \brief Find out if the level meter is disabled or not.
     *
@@ -178,6 +179,14 @@ class Meter final : public wxPanel
    // These exist solely for the purpose of reseting the toolbars
    void *SaveState();
    void RestoreState(void *state);
+
+ private:
+   static bool s_AcceptsFocus;
+   struct Resetter { void operator () (bool *p) const { if(p) *p = false; } };
+   using TempAllowFocus = std::unique_ptr<bool, Resetter>;
+
+ public:
+   static TempAllowFocus TemporarilyAllowFocus();
 
  private:
    //
@@ -247,18 +256,18 @@ class Meter final : public wxPanel
 
    bool      mActive;
 
-   int       mNumBars;
+   unsigned  mNumBars;
    MeterBar  mBar[kMaxMeterBars];
 
    bool      mLayoutValid;
 
-   wxBitmap *mBitmap;
+   std::unique_ptr<wxBitmap> mBitmap;
    wxRect    mIconRect;
    wxPoint   mLeftTextPos;
    wxPoint   mRightTextPos;
    wxSize    mLeftSize;
    wxSize    mRightSize;
-   wxBitmap *mIcon;
+   std::unique_ptr<wxBitmap> mIcon;
    wxPen     mPen;
    wxPen     mDisabledPen;
    wxPen     mPeakPeakPen;

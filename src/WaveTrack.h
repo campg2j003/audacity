@@ -69,7 +69,7 @@ class AUDACITY_DLL_API WaveTrack final : public Track {
    // Private since only factories are allowed to construct WaveTracks
    //
 
-   WaveTrack(DirManager * projDirManager,
+   WaveTrack(const std::shared_ptr<DirManager> &projDirManager,
              sampleFormat format = (sampleFormat)0,
              double rate = 0);
    WaveTrack(const WaveTrack &orig);
@@ -145,12 +145,12 @@ class AUDACITY_DLL_API WaveTrack final : public Track {
    const SpectrogramSettings &GetSpectrogramSettings() const;
    SpectrogramSettings &GetSpectrogramSettings();
    SpectrogramSettings &GetIndependentSpectrogramSettings();
-   void SetSpectrogramSettings(SpectrogramSettings *pSettings);
+   void SetSpectrogramSettings(std::unique_ptr<SpectrogramSettings> &&pSettings);
 
    const WaveformSettings &GetWaveformSettings() const;
    WaveformSettings &GetWaveformSettings();
    WaveformSettings &GetIndependentWaveformSettings();
-   void SetWaveformSettings(WaveformSettings *pSettings);
+   void SetWaveformSettings(std::unique_ptr<WaveformSettings> &&pSettings);
 
    //
    // High-level editing
@@ -201,26 +201,26 @@ class AUDACITY_DLL_API WaveTrack final : public Track {
     * one is created.
     */
    bool Append(samplePtr buffer, sampleFormat format,
-               sampleCount len, unsigned int stride=1,
+               size_t len, unsigned int stride=1,
                XMLWriter* blockFileLog=NULL);
    /// Flush must be called after last Append
    bool Flush();
 
    bool AppendAlias(const wxString &fName, sampleCount start,
-                    sampleCount len, int channel,bool useOD);
+                    size_t len, int channel,bool useOD);
 
    ///for use with On-Demand decoding of compressed files.
    ///decodeType should be an enum from ODDecodeTask that specifies what
    ///Type of encoded file this is, such as eODFLAC
    //vvv Why not use the ODTypeEnum typedef to enforce that for the parameter?
    bool AppendCoded(const wxString &fName, sampleCount start,
-                            sampleCount len, int channel, int decodeType);
+                            size_t len, int channel, int decodeType);
 
    ///gets an int with OD flags so that we can determine which ODTasks should be run on this track after save/open, etc.
    unsigned int GetODFlags();
 
-   ///Deletes all clips' wavecaches.  Careful, This may not be threadsafe.
-   void DeleteWaveCaches();
+   ///Invalidates all clips' wavecaches.  Careful, This may not be threadsafe.
+   void ClearWaveCaches();
 
    ///Adds an invalid region to the wavecache so it redraws that portion only.
    void  AddInvalidRegion(sampleCount startSample, sampleCount endSample);
@@ -236,11 +236,11 @@ class AUDACITY_DLL_API WaveTrack final : public Track {
    /// guaranteed that the same samples are affected.
    ///
    bool Get(samplePtr buffer, sampleFormat format,
-                   sampleCount start, sampleCount len, fillFormat fill=fillZero) const;
+                   sampleCount start, size_t len, fillFormat fill=fillZero) const;
    bool Set(samplePtr buffer, sampleFormat format,
-                   sampleCount start, sampleCount len);
-   void GetEnvelopeValues(double *buffer, int bufferLen,
-                         double t0, double tstep) const;
+                   sampleCount start, size_t len);
+   void GetEnvelopeValues(double *buffer, size_t bufferLen,
+                         double t0) const;
    bool GetMinMax(float *min, float *max,
                   double t0, double t1) const;
    bool GetRMS(float *rms, double t0, double t1);
@@ -262,11 +262,14 @@ class AUDACITY_DLL_API WaveTrack final : public Track {
    // Getting information about the track's internal block sizes
    // and alignment for efficiency
    //
-   
+
+   // This returns a possibly large or negative value
    sampleCount GetBlockStart(sampleCount t) const;
-   sampleCount GetBestBlockSize(sampleCount t) const;
-   sampleCount GetMaxBlockSize() const;
-   sampleCount GetIdealBlockSize();
+
+   // These return a nonnegative number of samples meant to size a memory buffer
+   size_t GetBestBlockSize(sampleCount t) const;
+   size_t GetMaxBlockSize() const;
+   size_t GetIdealBlockSize();
 
    //
    // XMLTagHandler callback methods for loading and saving
@@ -333,10 +336,83 @@ class AUDACITY_DLL_API WaveTrack final : public Track {
     */
    double LongSamplesToTime(sampleCount pos) const;
 
-   // Get access to the clips in the tracks. This is used by
-   // track artists and also by TrackPanel when sliding...it would
-   // be cleaner if this could be removed, though...
-   WaveClipList::compatibility_iterator GetClipIterator() { return mClips.GetFirst(); }
+   // Get access to the (visible) clips in the tracks, in unspecified order
+   // (not necessarioy sequenced in time).
+   WaveClipHolders &GetClips() { return mClips; }
+   const WaveClipConstHolders &GetClips() const
+      { return reinterpret_cast< const WaveClipConstHolders& >( mClips ); }
+
+   // Get access to all clips (in some unspecified sequence),
+   // including those hidden in cutlines.
+   class AllClipsIterator
+      : public std::iterator< std::forward_iterator_tag, WaveClip* >
+   {
+   public:
+      // Constructs an "end" iterator
+      AllClipsIterator () {}
+
+      // Construct a "begin" iterator
+      explicit AllClipsIterator( WaveTrack &track )
+      {
+         push( track.mClips );
+      }
+
+      WaveClip *operator * () const
+      {
+         if (mStack.empty())
+            return nullptr;
+         else
+            return mStack.back().first->get();
+      }
+
+      AllClipsIterator &operator ++ ()
+      {
+         // The unspecified sequence is a post-order, but there is no
+         // promise whether sister nodes are ordered in time.
+         if ( !mStack.empty() ) {
+            auto &pair =  mStack.back();
+            if ( ++pair.first == pair.second ) {
+               mStack.pop_back();
+            }
+            else
+               push( (*pair.first)->GetCutLines() );
+         }
+
+         return *this;
+      }
+
+      // Define == well enough to serve for loop termination test
+      friend bool operator ==
+         (const AllClipsIterator &a, const AllClipsIterator &b)
+      { return a.mStack.empty() == b.mStack.empty(); }
+
+      friend bool operator !=
+         (const AllClipsIterator &a, const AllClipsIterator &b)
+      { return !( a == b ); }
+
+   private:
+
+      void push( WaveClipHolders &clips )
+      {
+         auto pClips = &clips;
+         while (!pClips->empty()) {
+            auto first = pClips->begin();
+            mStack.push_back( Pair( first, pClips->end() ) );
+            pClips = &(*first)->GetCutLines();
+         }
+      }
+
+      using Iterator = WaveClipHolders::iterator;
+      using Pair = std::pair< Iterator, Iterator >;
+      using Stack = std::vector< Pair >;
+
+      Stack mStack;
+   };
+
+   IteratorRange< AllClipsIterator > GetAllClips()
+   {
+      return { AllClipsIterator{ *this }, AllClipsIterator{ } };
+   }
 
    // Create NEW clip and add it to this track. Returns a pointer
    // to the newly created clip.
@@ -357,19 +433,21 @@ class AUDACITY_DLL_API WaveTrack final : public Track {
    WaveClip* RightmostOrNewClip();
 
    // Get the linear index of a given clip (-1 if the clip is not found)
-   int GetClipIndex(WaveClip* clip);
+   int GetClipIndex(const WaveClip* clip) const;
 
    // Get the nth clip in this WaveTrack (will return NULL if not found).
    // Use this only in special cases (like getting the linked clip), because
    // it is much slower than GetClipIterator().
-   WaveClip* GetClipByIndex(int index);
+   WaveClip *GetClipByIndex(int index);
+   const WaveClip* GetClipByIndex(int index) const;
 
    // Get number of clips in this WaveTrack
    int GetNumClips() const;
 
    // Add all wave clips to the given array 'clips' and sort the array by
    // clip start time. The array is emptied prior to adding the clips.
-   void FillSortedClipArray(WaveClipArray& clips) const;
+   WaveClipPointers SortedClipArray();
+   WaveClipConstPointers SortedClipArray() const;
 
    // Before calling 'Offset' on a clip, use this function to see if the
    // offsetting is allowed with respect to the other clips in this track.
@@ -382,17 +460,12 @@ class AUDACITY_DLL_API WaveTrack final : public Track {
    // existing clips).
    bool CanInsertClip(WaveClip* clip);
 
-   // Move a clip into a NEW track. This will remove the clip
-   // in this cliplist and add it to the cliplist of the
-   // other track (if that is not NULL). No fancy additional stuff is done.
-   // unused   void MoveClipToTrack(int clipIndex, WaveTrack* dest);
-   void MoveClipToTrack(WaveClip *clip, WaveTrack* dest);
-
-   // Remove the clip from the track and return a pointer to it.
-   WaveClip* RemoveAndReturnClip(WaveClip* clip);
+   // Remove the clip from the track and return a SMART pointer to it.
+   // You assume responsibility for its memory!
+   movable_ptr<WaveClip> RemoveAndReturnClip(WaveClip* clip);
 
    // Append a clip to the track
-   void AddClip(WaveClip* clip);
+   void AddClip(movable_ptr<WaveClip> &&clip); // Call using std::move
 
    // Merge two clips, that is append data from clip2 to clip1,
    // then remove clip2 from track.
@@ -477,13 +550,17 @@ class AUDACITY_DLL_API WaveTrack final : public Track {
    void GetSpectrumBounds(float *min, float *max) const;
    void SetSpectrumBounds(float min, float max) const;
 
+   // For display purposes, calculate the y coordinate where the midline of
+   // the wave should be drawn, if display minimum and maximum map to the
+   // bottom and top.  Maybe that is out of bounds.
+   int ZeroLevelYCoordinate(wxRect rect) const;
 
  protected:
    //
    // Protected variables
    //
 
-   WaveClipList mClips;
+   WaveClipHolders mClips;
 
    sampleFormat  mFormat;
    int           mRate;
@@ -520,8 +597,8 @@ class AUDACITY_DLL_API WaveTrack final : public Track {
    double mLegacyProjectFileOffset;
    int mAutoSaveIdent;
 
-   SpectrogramSettings *mpSpectrumSettings;
-   WaveformSettings *mpWaveformSettings;
+   std::unique_ptr<SpectrogramSettings> mpSpectrumSettings;
+   std::unique_ptr<WaveformSettings> mpWaveformSettings;
 };
 
 // This is meant to be a short-lived object, during whose lifetime,
@@ -547,7 +624,7 @@ public:
    // Returns null on failure
    // Returned pointer may be invalidated if Get is called again
    // Do not DELETE[] the pointer
-   constSamplePtr Get(sampleFormat format, sampleCount start, sampleCount len);
+   constSamplePtr Get(sampleFormat format, sampleCount start, size_t len);
 
 private:
    void Free();
@@ -563,7 +640,7 @@ private:
    };
 
    const WaveTrack *mPTrack;
-   sampleCount mBufferSize;
+   size_t mBufferSize;
    Buffer mBuffers[2];
    GrowableSampleBuffer mOverlapBuffer;
    int mNValidBuffers;

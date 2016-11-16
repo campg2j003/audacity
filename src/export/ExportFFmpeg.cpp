@@ -53,13 +53,13 @@ function.
 
 #if defined(USE_FFMPEG)
 
-extern FFmpegLibs *FFmpegLibsInst;
+extern FFmpegLibs *FFmpegLibsInst();
 
 static bool CheckFFmpegPresence(bool quiet = false)
 {
    bool result = true;
    PickFFmpegLibs();
-   if (!FFmpegLibsInst->ValidLibsLoaded())
+   if (!FFmpegLibsInst()->ValidLibsLoaded())
    {
       if (!quiet)
       {
@@ -113,7 +113,7 @@ public:
    void SetMetadata(const Tags *tags, const char *name, const wxChar *tag);
 
    /// Encodes audio
-   bool EncodeAudioFrame(int16_t *pFrame, int frameSize);
+   bool EncodeAudioFrame(int16_t *pFrame, size_t frameSize);
 
    /// Flushes audio encoder
    bool Finalize();
@@ -141,7 +141,7 @@ public:
    ///\param subformat index of export type
    ///\return true if export succeded
    int Export(AudacityProject *project,
-      int channels,
+      unsigned channels,
       const wxString &fName,
       bool selectedOnly,
       double t0,
@@ -162,7 +162,7 @@ private:
    int               mSubFormat{};
    int               mBitRate{};
    int               mSampleRate{};
-   int               mChannels{};
+   unsigned          mChannels{};
    bool              mSupportsUTF8{};
 
    // Smart pointer fields, their order is the reverse in which they are reset in Finalize():
@@ -185,14 +185,14 @@ ExportFFmpeg::ExportFFmpeg()
    mSupportsUTF8 = true;
 
    PickFFmpegLibs(); // DropFFmpegLibs() call is in ExportFFmpeg destructor
-   int avfver = FFmpegLibsInst->ValidLibsLoaded() ? avformat_version() : 0;
+   int avfver = FFmpegLibsInst()->ValidLibsLoaded() ? avformat_version() : 0;
    int newfmt;
    // Adds export types from the export type list
    for (newfmt = 0; newfmt < FMT_LAST; newfmt++)
    {
       wxString shortname(ExportFFmpegOptions::fmts[newfmt].shortname);
       //Don't hide export types when there's no av-libs, and don't hide FMT_OTHER
-      if (newfmt < FMT_OTHER && FFmpegLibsInst->ValidLibsLoaded())
+      if (newfmt < FMT_OTHER && FFmpegLibsInst()->ValidLibsLoaded())
       {
          // Format/Codec support is compiled in?
          AVOutputFormat *avoformat = av_guess_format(shortname.mb_str(), NULL, NULL);
@@ -249,8 +249,8 @@ bool ExportFFmpeg::CheckFileName(wxFileName & WXUNUSED(filename), int WXUNUSED(f
    // Show "Locate FFmpeg" dialog
    if (!CheckFFmpegPresence(true))
    {
-      FFmpegLibsInst->FindLibs(NULL);
-      FFmpegLibsInst->FreeLibs();
+      FFmpegLibsInst()->FindLibs(NULL);
+      FFmpegLibsInst()->FreeLibs();
       return LoadFFmpeg(true);
    }
 
@@ -261,14 +261,15 @@ bool ExportFFmpeg::Init(const char *shortname, AudacityProject *project, const T
 {
    // This will undo the acquisition of resources along any early exit path:
    auto deleter = [](ExportFFmpeg *This) {
-      This->FreeResources();
+      if (This)
+         This->FreeResources();
    };
    std::unique_ptr<ExportFFmpeg, decltype(deleter)> cleanup{ this, deleter };
 
    int err;
-   //FFmpegLibsInst->LoadLibs(NULL,true); //Loaded at startup or from Prefs now
+   //FFmpegLibsInst()->LoadLibs(NULL,true); //Loaded at startup or from Prefs now
 
-   if (!FFmpegLibsInst->ValidLibsLoaded())
+   if (!FFmpegLibsInst()->ValidLibsLoaded())
       return false;
 
    av_log_set_callback(av_log_wx_callback);
@@ -650,7 +651,7 @@ static int encode_audio(AVCodecContext *avctx, AVPacket *pkt, int16_t *audio_sam
 
 bool ExportFFmpeg::Finalize()
 {
-   int i, nEncodedBytes;
+   int nEncodedBytes;
 
    // Flush the audio FIFO and encoder.
    for (;;)
@@ -759,7 +760,7 @@ void ExportFFmpeg::FreeResources()
    av_log_set_callback(av_log_default_callback);
 }
 
-bool ExportFFmpeg::EncodeAudioFrame(int16_t *pFrame, int frameSize)
+bool ExportFFmpeg::EncodeAudioFrame(int16_t *pFrame, size_t frameSize)
 {
    int nBytesToWrite = 0;
    uint8_t *pRawSamples = NULL;
@@ -823,7 +824,7 @@ bool ExportFFmpeg::EncodeAudioFrame(int16_t *pFrame, int frameSize)
 
 
 int ExportFFmpeg::Export(AudacityProject *project,
-                       int channels, const wxString &fName,
+                       unsigned channels, const wxString &fName,
                        bool selectionOnly, double t0, double t1, MixerSpec *mixerSpec, const Tags *metadata, int subformat)
 {
    if (!CheckFFmpegPresence())
@@ -871,7 +872,7 @@ int ExportFFmpeg::Export(AudacityProject *project,
          wxString::Format(_("Exporting entire file as %s"), ExportFFmpegOptions::fmts[mSubFormat].description));
 
       while (updateResult == eProgressSuccess) {
-         sampleCount pcmNumSamples = mixer->Process(pcmBufferSize);
+         auto pcmNumSamples = mixer->Process(pcmBufferSize);
 
          if (pcmNumSamples == 0)
             break;
@@ -936,7 +937,7 @@ void ExportFFmpeg::SetMetadata(const Tags *tags, const char *name, const wxChar 
 
 int ExportFFmpeg::AskResample(int bitrate, int rate, int lowrate, int highrate, const int *sampRates)
 {
-   wxDialog d(NULL, wxID_ANY, wxString(_("Invalid sample rate")));
+   wxDialogWrapper d(nullptr, wxID_ANY, wxString(_("Invalid sample rate")));
    d.SetName(d.GetTitle());
    wxChoice *choice;
    ShuttleGui S(&d, eIsCreating);

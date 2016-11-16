@@ -41,6 +41,7 @@ class Importer;
 class CommandHandler;
 class AppCommandEvent;
 class AudacityLogger;
+class AudacityProject;
 
 void SaveWindowSize();
 
@@ -92,10 +93,11 @@ enum CommandFlag : unsigned long long
    IsRealtimeNotActiveFlag= 0x10000000,  //lll
    CaptureNotBusyFlag     = 0x20000000,
    CanStopAudioStreamFlag = 0x40000000,
-   RulerHasFocus
-                          = 0x80000000ULL, // prl
-//   nextOneHas33BitsWow
-//                        = 0x100000000ULL, // prl
+   RulerHasFocus          = 0x80000000ULL, // prl
+   NotMinimizedFlag      = 0x100000000ULL, // prl
+   PausedFlag            = 0x200000000ULL, // jkc
+   NotPausedFlag         = 0x400000000ULL, // jkc
+   HasWaveDataFlag       = 0x800000000ULL, // jkc
 
    NoFlagsSpecifed        = ~0ULL
 };
@@ -179,6 +181,7 @@ inline CommandFlag & operator |= (CommandFlag &lhs, CommandFlag rhs)
 using CommandMask = CommandFlag;
 
 class BlockFile;
+class AliasBlockFile;
 
 class AudacityApp final : public wxApp {
  public:
@@ -202,6 +205,7 @@ class AudacityApp final : public wxApp {
    void OnMenuPreferences(wxCommandEvent & event);
    void OnMenuExit(wxCommandEvent & event);
 
+   void OnQueryEndSession(wxCloseEvent & event);
    void OnEndSession(wxCloseEvent & event);
 
    // Most Recently Used File support (for all platforms).
@@ -226,7 +230,7 @@ class AudacityApp final : public wxApp {
      * ShouldShowMissingAliasedFileWarning can be called to determine
      * if the user should be notified
      */
-   void MarkAliasedFilesMissingWarning(const BlockFile *b);
+   void MarkAliasedFilesMissingWarning(const AliasBlockFile *b);
 
    /** \brief Changes the behavior of missing aliased blockfiles warnings
      */
@@ -271,7 +275,7 @@ class AudacityApp final : public wxApp {
                                    int flags = wxDIR_FILES);
    static bool IsTempDirectoryNameOK( const wxString & Name );
 
-   FileHistory *GetRecentFiles() {return mRecentFiles;}
+   FileHistory *GetRecentFiles() {return mRecentFiles.get();}
    void AddFileToHistory(const wxString & name);
    bool GetWindowRectAlreadySaved()const {return mWindowRectAlreadySaved;}
    void SetWindowRectAlreadySaved(bool alreadySaved) {mWindowRectAlreadySaved = alreadySaved;}
@@ -283,22 +287,22 @@ class AudacityApp final : public wxApp {
 #endif
 
  private:
-   CommandHandler *mCmdHandler;
-   FileHistory *mRecentFiles;
+   std::unique_ptr<CommandHandler> mCmdHandler;
+   std::unique_ptr<FileHistory> mRecentFiles;
 
-   wxLocale *mLocale;
+   std::unique_ptr<wxLocale> mLocale;
 
-   wxSingleInstanceChecker *mChecker;
+   std::unique_ptr<wxSingleInstanceChecker> mChecker;
 
    wxTimer mTimer;
 
    bool                 m_aliasMissingWarningShouldShow;
-   const BlockFile     *m_LastMissingBlockFile;
+   std::weak_ptr< AudacityProject > m_LastMissingBlockFileProject;
+   wxString             m_LastMissingBlockFilePath;
 
    ODLock               m_LastMissingBlockFileLock;
 
    void InitCommandHandler();
-   void DeInitCommandHandler();
 
    bool InitTempDir();
    bool CreateSingleInstanceChecker(const wxString &dir);
@@ -308,9 +312,9 @@ class AudacityApp final : public wxApp {
    bool mWindowRectAlreadySaved;
 
 #if defined(__WXMSW__)
-   IPCServ *mIPCServ;
+   std::unique_ptr<IPCServ> mIPCServ;
 #else
-   wxSocketServer *mIPCServ;
+   std::unique_ptr<wxSocketServer> mIPCServ;
 #endif
 
  public:

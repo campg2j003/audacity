@@ -29,8 +29,9 @@ class wxTextCtrl;
 class AudacityProject;
 class LabelTrack;
 class ShuttleGui;
+class Track;
 
-class ExportMultiple final : public wxDialog
+class ExportMultiple final : public wxDialogWrapper
 {
 public:
 
@@ -73,7 +74,7 @@ private:
     * @param t1 End time for export
     * @param tags Metadata to include in the file (if possible).
     */
-   int DoExport(int channels,
+   int DoExport(unsigned channels,
                  const wxFileName &name,
                  bool selectedOnly,
                  double t0,
@@ -111,7 +112,10 @@ private:
    LabelTrack *mLabels;
    int mNumLabels;
    int mNumWaveTracks;
-   wxArrayPtrVoid mSelected;
+
+   // PRL:  This is never populated anywhere?
+   std::vector<Track*> mSelected;
+
    int mFilterIndex;          /**< The index in the drop-down list of export
                                 formats (mFormat) of the selected export format.
                                 This list includes all possible
@@ -124,9 +128,6 @@ private:
 
    // List of file actually exported
    wxArrayString mExported;
-
-   /** Array of characters not allowed to be in file names on this platform */
-   wxArrayString exclude;
 
    wxChoice      *mFormat;    /**< Drop-down list of export formats
                                 (combinations of plug-in and subformat) */
@@ -166,11 +167,11 @@ private:
 
 };
 
-class SuccessDialog final : public wxDialog
+class SuccessDialog final : public wxDialogWrapper
 {
 public:
    SuccessDialog(wxWindow *parent, wxWindowID id, const wxString &title) :
-      wxDialog(parent, id, title, wxDefaultPosition,
+      wxDialogWrapper(parent, id, title, wxDefaultPosition,
          wxDefaultSize, wxDEFAULT_DIALOG_STYLE | wxRESIZE_BORDER) {};
    void OnKeyDown(wxListEvent& event); // dismisses dialog when <enter> is pressed with list control having focus
    void OnItemActivated(wxListEvent& event); // dismisses dialog when <enter> is pressed with list item having focus
@@ -199,7 +200,7 @@ private:
       wxFileName destfile; /**< The file to export to */
       double t0;           /**< Start time for the export */
       double t1;           /**< End time for the export */
-      int channels;        /**< Number of channels for ExportMultipleByTrack */
+      unsigned channels;   /**< Number of channels for ExportMultipleByTrack */
    };  // end of ExportKit declaration
    /* we are going to want an set of these kits, and don't know how many until
     * runtime. I would dearly like to use a std::vector, but it seems that

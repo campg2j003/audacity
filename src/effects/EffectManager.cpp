@@ -55,13 +55,6 @@ EffectManager::~EffectManager()
    // wxWidgets has already destroyed the rack since it was derived from wxFrame. So
    // no need to DELETE it here.
 #endif
-
-   EffectMap::iterator iter = mHostEffects.begin();
-   while (iter != mHostEffects.end())
-   {
-      delete iter->second;
-      ++iter;
-   }
 }
 
 // Here solely for the purpose of Nyquist Workbench until
@@ -434,7 +427,7 @@ void EffectManager::RealtimeAddEffect(Effect *effect)
       effect->RealtimeInitialize();
 
       // Add the required processors
-      for (size_t i = 0, cnt = mRealtimeChans.GetCount(); i < cnt; i++)
+      for (size_t i = 0, cnt = mRealtimeChans.size(); i < cnt; i++)
       {
          effect->RealtimeAddProcessor(i, mRealtimeChans[i], mRealtimeRates[i]);
       }
@@ -471,7 +464,7 @@ void EffectManager::RealtimeInitialize()
    RealtimeSuspend();
 
    // (Re)Set processor parameters
-   mRealtimeChans.Clear();
+   mRealtimeChans.clear();
    mRealtimeRates.Clear();
 
    // RealtimeAdd/RemoveEffect() needs to know when we're active so it can
@@ -488,14 +481,14 @@ void EffectManager::RealtimeInitialize()
    RealtimeResume();
 }
 
-void EffectManager::RealtimeAddProcessor(int group, int chans, float rate)
+void EffectManager::RealtimeAddProcessor(int group, unsigned chans, float rate)
 {
    for (size_t i = 0, cnt = mRealtimeEffects.GetCount(); i < cnt; i++)
    {
       mRealtimeEffects[i]->RealtimeAddProcessor(group, chans, rate);
    }
 
-   mRealtimeChans.Add(chans);
+   mRealtimeChans.push_back(chans);
    mRealtimeRates.Add(rate);
 }
 
@@ -514,7 +507,7 @@ void EffectManager::RealtimeFinalize()
    }
 
    // Reset processor parameters
-   mRealtimeChans.Clear();
+   mRealtimeChans.clear();
    mRealtimeRates.Clear();
 
    // No longer active
@@ -594,7 +587,7 @@ void EffectManager::RealtimeProcessStart()
 //
 // This will be called in a different thread than the main GUI thread.
 //
-sampleCount EffectManager::RealtimeProcess(int group, int chans, float **buffers, sampleCount numSamples)
+size_t EffectManager::RealtimeProcess(int group, unsigned chans, float **buffers, size_t numSamples)
 {
    // Protect ourselves from the main thread
    mRealtimeLock.Enter();
@@ -706,13 +699,11 @@ Effect *EffectManager::GetEffect(const PluginID & ID)
    // TODO: This is temporary and should be redone when all effects are converted
    if (mEffects.find(ID) == mEffects.end())
    {
-      Effect *effect;
-
       // This will instantiate the effect client if it hasn't already been done
       EffectIdentInterface *ident = dynamic_cast<EffectIdentInterface *>(PluginManager::Get().GetInstance(ID));
       if (ident && ident->IsLegacy())
       {
-         effect = dynamic_cast<Effect *>(ident);
+         auto effect = dynamic_cast<Effect *>(ident);
          if (effect && effect->Startup(NULL))
          {
             mEffects[ID] = effect;
@@ -720,18 +711,17 @@ Effect *EffectManager::GetEffect(const PluginID & ID)
          }
       }
 
-      effect = new Effect();
+      auto effect = std::make_shared<Effect>(); // TODO: use make_unique and store in std::unordered_map
       if (effect)
       {
          EffectClientInterface *client = dynamic_cast<EffectClientInterface *>(ident);
          if (client && effect->Startup(client))
          {
-            mEffects[ID] = effect;
-            mHostEffects[ID] = effect;
-            return effect;
+            auto pEffect = effect.get();
+            mEffects[ID] = pEffect;
+            mHostEffects[ID] = std::move(effect);
+            return pEffect;
          }
-
-         delete effect;
       }
 
       wxMessageBox(wxString::Format(_("Attempting to initialize the following effect failed:\n\n%s\n\nMore information may be available in Help->Show Log"),

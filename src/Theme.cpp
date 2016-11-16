@@ -65,6 +65,7 @@ and use it for toolbar and window layouts too.
 #include "Project.h"
 #include "toolbars/ToolBar.h"
 #include "toolbars/ToolManager.h"
+#include "widgets/Ruler.h"
 #include "ImageManipulation.h"
 #include "Theme.h"
 #include "Experimental.h"
@@ -230,6 +231,7 @@ void Theme::ApplyUpdatedImages()
       if( pToolBar )
          pToolBar->ReCreateButtons();
    }
+   p->GetRulerPanel()->ReCreateButtons();
 }
 
 void Theme::RegisterImages()
@@ -432,6 +434,17 @@ void FlowPacker::SetNewGroup( int iGroupSize )
    mComponentWidth=0;
 }
 
+void FlowPacker::SetColourGroup( )
+{
+   myPosBase = 750;
+   mxPos =0;
+   mOldFlags = mFlags;
+   iImageGroupSize = 1;
+   iImageGroupIndex = -1;
+   mComponentWidth=0;
+   myHeight = 11;
+}
+
 void FlowPacker::GetNextPosition( int xSize, int ySize )
 {
    // if the height has increased, then we are on a NEW group.
@@ -502,7 +515,7 @@ int SourceOutputStream::OpenFile(const wxString & Filename)
       File.Write( wxT("//\r\n") );
       File.Write( wxT("//   This file was Auto-Generated.\r\n") );
       File.Write( wxT("//   It is included by Theme.cpp.\r\n") );
-      File.Write( wxT("//   Only check this into SVN if you've read and understood the guidelines!\r\n\r\n   ") );
+      File.Write( wxT("//   Only check this into Git if you've read and understood the guidelines!\r\n\r\n   ") );
    }
    return bOk;
 }
@@ -586,9 +599,8 @@ void ThemeBase::CreateImageCache( bool bBinarySave )
    // Now save the colours.
    int x,y;
 
-   mFlow.SetNewGroup(1);
-   const int iColSize=10;
-   mFlow.myHeight = iColSize+1;
+   mFlow.SetColourGroup();
+   const int iColSize = 10;
    for(i=0;i<(int)mColours.GetCount();i++)
    {
       mFlow.GetNextPosition( iColSize, iColSize );
@@ -709,8 +721,8 @@ void ThemeBase::WriteImageMap( )
       }
    }
    // Now save the colours.
-   mFlow.SetNewGroup(1);
-   const int iColSize=10;
+   mFlow.SetColourGroup();
+   const int iColSize = 10;
    for(i=0;i<(int)mColours.GetCount();i++)
    {
       mFlow.GetNextPosition( iColSize, iColSize );
@@ -847,10 +859,9 @@ bool ThemeBase::ReadImageCache( bool bBinaryRead, bool bOkIfNotFound)
 //   return true; //To not load colours..
    // Now load the colours.
    int x,y;
-   mFlow.SetNewGroup(1);
+   mFlow.SetColourGroup();
    wxColour TempColour;
    const int iColSize=10;
-   mFlow.myHeight = iColSize+1;
    for(i=0;i<(int)mColours.GetCount();i++)
    {
       mFlow.GetNextPosition( iColSize, iColSize );
@@ -958,27 +969,41 @@ void ThemeBase::SaveComponents()
       if( (mBitmapFlags[i] & resFlagInternal)==0)
       {
          FileName = FileNames::ThemeComponent( mBitmapNames[i] );
-         if( !wxFileExists( FileName ))
+         if( wxFileExists( FileName ))
          {
-            if( !mImages[i].SaveFile( FileName, wxBITMAP_TYPE_PNG ))
-            {
-               wxMessageBox(
-                  wxString::Format(
-                  _("Audacity could not save file:\n  %s"),
-                     FileName.c_str() ));
-               return;
-            }
-            n++;
+            ++n;
+            break;
          }
       }
    }
-   if( n==0 )
+
+   if (n > 0)
    {
-      wxMessageBox(
-         wxString::Format(
-         _("All required files in:\n  %s\nwere already present."),
-            FileNames::ThemeComponentsDir().c_str() ));
-      return;
+      auto result =
+         wxMessageBox(
+            wxString::Format(
+               _("Some required files in:\n  %s\nwere already present.  Overwrite?"),
+               FileNames::ThemeComponentsDir().c_str()),
+               wxMessageBoxCaptionStr,
+               wxYES_NO | wxNO_DEFAULT);
+      if(result == wxNO)
+         return;
+   }
+
+   for(i=0;i<(int)mImages.GetCount();i++)
+   {
+      if( (mBitmapFlags[i] & resFlagInternal)==0)
+      {
+         FileName = FileNames::ThemeComponent( mBitmapNames[i] );
+         if( !mImages[i].SaveFile( FileName, wxBITMAP_TYPE_PNG ))
+         {
+            wxMessageBox(
+               wxString::Format(
+               _("Audacity could not save file:\n  %s"),
+                  FileName.c_str() ));
+            return;
+         }
+      }
    }
    wxMessageBox(
       wxString::Format(

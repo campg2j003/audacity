@@ -52,6 +52,7 @@ effects from this one class.
 #include "../../Internat.h"
 #include "../../ShuttleGui.h"
 #include "../../widgets/valnum.h"
+#include "../../widgets/wxPanelWrapper.h"
 
 // ============================================================================
 // List of effects that ship with Audacity.  These will be autoregistered.
@@ -327,7 +328,7 @@ wxArrayString LadspaEffectsModule::GetSearchPaths()
 //
 ///////////////////////////////////////////////////////////////////////////////
 
-class LadspaEffectOptionsDialog final : public wxDialog
+class LadspaEffectOptionsDialog final : public wxDialogWrapper
 {
 public:
    LadspaEffectOptionsDialog(wxWindow * parent, EffectHostInterface *host);
@@ -344,12 +345,12 @@ private:
    DECLARE_EVENT_TABLE()
 };
 
-BEGIN_EVENT_TABLE(LadspaEffectOptionsDialog, wxDialog)
+BEGIN_EVENT_TABLE(LadspaEffectOptionsDialog, wxDialogWrapper)
    EVT_BUTTON(wxID_OK, LadspaEffectOptionsDialog::OnOk)
 END_EVENT_TABLE()
 
 LadspaEffectOptionsDialog::LadspaEffectOptionsDialog(wxWindow * parent, EffectHostInterface *host)
-:  wxDialog(parent, wxID_ANY, wxString(_("LADSPA Effect Options")))
+:  wxDialogWrapper(parent, wxID_ANY, wxString(_("LADSPA Effect Options")))
 {
    mHost = host;
 
@@ -446,7 +447,7 @@ private:
    float mMax;
    float mLastValue;
 
-   DECLARE_EVENT_TABLE();
+   DECLARE_EVENT_TABLE()
 };
 
 BEGIN_EVENT_TABLE(LadspaEffectMeter, wxWindow)
@@ -637,7 +638,7 @@ wxString LadspaEffect::GetVendor()
 
 wxString LadspaEffect::GetVersion()
 {
-   return _("N/A");
+   return _("n/a");
 }
 
 wxString LadspaEffect::GetDescription()
@@ -865,12 +866,12 @@ bool LadspaEffect::SetHost(EffectHostInterface *host)
    return true;
 }
 
-int LadspaEffect::GetAudioInCount()
+unsigned LadspaEffect::GetAudioInCount()
 {
    return mAudioIns;
 }
 
-int LadspaEffect::GetAudioOutCount()
+unsigned LadspaEffect::GetAudioOutCount()
 {
    return mAudioOuts;
 }
@@ -885,12 +886,12 @@ int LadspaEffect::GetMidiOutCount()
    return 0;
 }
 
-void LadspaEffect::SetSampleRate(sampleCount rate)
+void LadspaEffect::SetSampleRate(double rate)
 {
    mSampleRate = rate;
 }
 
-sampleCount LadspaEffect::SetBlockSize(sampleCount maxBlockSize)
+size_t LadspaEffect::SetBlockSize(size_t maxBlockSize)
 {
    mBlockSize = maxBlockSize;
 
@@ -902,13 +903,13 @@ sampleCount LadspaEffect::GetLatency()
    if (mUseLatency && mLatencyPort >= 0 && !mLatencyDone)
    {
       mLatencyDone = true;
-      return mOutputControls[mLatencyPort];
+      return sampleCount ( mOutputControls[mLatencyPort] );
    }
 
    return 0;
 }
 
-sampleCount LadspaEffect::GetTailSize()
+size_t LadspaEffect::GetTailSize()
 {
    return 0;
 }
@@ -949,7 +950,7 @@ bool LadspaEffect::ProcessFinalize()
    return true;
 }
 
-sampleCount LadspaEffect::ProcessBlock(float **inBlock, float **outBlock, sampleCount blockLen)
+size_t LadspaEffect::ProcessBlock(float **inBlock, float **outBlock, size_t blockLen)
 {
    for (int i = 0; i < mAudioIns; i++)
    {
@@ -973,7 +974,7 @@ bool LadspaEffect::RealtimeInitialize()
    return true;
 }
 
-bool LadspaEffect::RealtimeAddProcessor(int WXUNUSED(numChannels), float sampleRate)
+bool LadspaEffect::RealtimeAddProcessor(unsigned WXUNUSED(numChannels), float sampleRate)
 {
    LADSPA_Handle slave = InitInstance(sampleRate);
    if (!slave)
@@ -1012,10 +1013,10 @@ bool LadspaEffect::RealtimeProcessStart()
    return true;
 }
 
-sampleCount LadspaEffect::RealtimeProcess(int group,
+size_t LadspaEffect::RealtimeProcess(int group,
                                           float **inbuf,
                                           float **outbuf,
-                                          sampleCount numSamples)
+                                          size_t numSamples)
 {
    for (int i = 0; i < mAudioIns; i++)
    {
@@ -1410,7 +1411,7 @@ bool LadspaEffect::PopulateUI(wxWindow *parent)
             item = safenew wxStaticText(w, 0, labelText + wxT(":"));
             gridSizer->Add(item, 0, wxALIGN_CENTER_VERTICAL | wxALIGN_RIGHT | wxALL, 5);
 
-            LADSPA_PortRangeHint hint = mData->PortRangeHints[p];
+            //LADSPA_PortRangeHint hint = mData->PortRangeHints[p];
 
             wxString bound;
             float lower = 0.0;

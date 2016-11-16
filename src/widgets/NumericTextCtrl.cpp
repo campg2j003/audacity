@@ -767,9 +767,8 @@ void NumericConverter::ValueToControls(double rawValue, bool nearest /* = true *
    //rawValue = 4.9995f; Only for testing!
    if (mType == TIME)
       rawValue =
-      (double)((sampleCount)floor(rawValue * mSampleRate +
-                                  (nearest ? 0.5f : 0.0f)))
-         / mSampleRate; // put on a sample
+         floor(rawValue * mSampleRate + (nearest ? 0.5f : 0.0f))
+            / mSampleRate; // put on a sample
    double theValue =
       rawValue * mScalingFactor + .000001; // what's this .000001 for? // well, no log of 0
    sampleCount t_int;
@@ -794,7 +793,7 @@ void NumericConverter::ValueToControls(double rawValue, bool nearest /* = true *
    if (theValue < 0)
       t_frac = -1;
    else
-      t_frac = (theValue - t_int);
+      t_frac = (theValue - t_int.as_double() );
    unsigned int i;
    int tenMins;
    int mins;
@@ -848,7 +847,9 @@ void NumericConverter::ValueToControls(double rawValue, bool nearest /* = true *
       }
       else {
          if (t_int >= 0) {
-            value = (t_int / mFields[i].base);
+            // UNSAFE_SAMPLE_COUNT_TRUNCATION
+            // truncation danger!
+            value = (t_int.as_long_long() / mFields[i].base);
             if (mFields[i].range > 0)
                value = value % mFields[i].range;
          }
@@ -890,7 +891,7 @@ void NumericConverter::ControlsToValue()
 
    t /= mScalingFactor;
    if(mNtscDrop) {
-      int t_int = int(t + .000000001);
+      int t_int = (int)(t + .000000001);
       double t_frac = (t - t_int);
       int tenMins = t_int/600;
       double frames = tenMins*17982;
@@ -956,7 +957,7 @@ void NumericConverter::SetMinValue(double minValue)
 
 void NumericConverter::ResetMinValue()
 {
-   mMinValue = std::numeric_limits<double>::min();
+   mMinValue = 0.0;
 }
 
 void NumericConverter::SetMaxValue(double maxValue)
@@ -1175,9 +1176,9 @@ NumericTextCtrl::NumericTextCtrl(NumericConverter::Type type,
                            bool autoPos):
    wxControl(parent, id, pos, size, wxSUNKEN_BORDER | wxWANTS_CHARS),
    NumericConverter(type, formatName, timeValue, sampleRate),
-   mBackgroundBitmap(NULL),
-   mDigitFont(NULL),
-   mLabelFont(NULL),
+   mBackgroundBitmap{},
+   mDigitFont{},
+   mLabelFont{},
    mLastField(1),
    mAutoPos(autoPos)
    , mType(type)
@@ -1211,12 +1212,6 @@ NumericTextCtrl::NumericTextCtrl(NumericConverter::Type type,
 
 NumericTextCtrl::~NumericTextCtrl()
 {
-   if (mBackgroundBitmap)
-      delete mBackgroundBitmap;
-   if (mDigitFont)
-      delete mDigitFont;
-   if (mLabelFont)
-      delete mLabelFont;
 }
 
 // Set the focus to the first (left-most) non-zero digit
@@ -1306,12 +1301,9 @@ bool NumericTextCtrl::Layout()
    int x, pos;
 
    wxMemoryDC memDC;
-   if (mBackgroundBitmap) {
-      delete mBackgroundBitmap;
-      mBackgroundBitmap = NULL;
-   }
+
    // Placeholder bitmap so the memDC has something to reference
-   mBackgroundBitmap = new wxBitmap(1, 1);
+   mBackgroundBitmap = std::make_unique<wxBitmap>(1, 1);
    memDC.SelectObject(*mBackgroundBitmap);
 
    mDigits.Clear();
@@ -1335,9 +1327,7 @@ bool NumericTextCtrl::Layout()
    }
    fontSize--;
 
-   if (mDigitFont)
-      delete mDigitFont;
-   mDigitFont = new wxFont(fontSize, wxFONTFAMILY_DEFAULT, wxFONTSTYLE_NORMAL, wxFONTWEIGHT_NORMAL);
+   mDigitFont = std::make_unique<wxFont>(fontSize, wxFONTFAMILY_DEFAULT, wxFONTSTYLE_NORMAL, wxFONTWEIGHT_NORMAL);
    memDC.SetFont(*mDigitFont);
    memDC.GetTextExtent(exampleText, &strW, &strH);
    mDigitW = strW;
@@ -1345,9 +1335,7 @@ bool NumericTextCtrl::Layout()
 
    // The label font should be a little smaller
    fontSize--;
-   if (mLabelFont)
-      delete mLabelFont;
-   mLabelFont = new wxFont(fontSize, wxFONTFAMILY_DEFAULT, wxFONTSTYLE_NORMAL, wxFONTWEIGHT_NORMAL);
+   mLabelFont = std::make_unique<wxFont>(fontSize, wxFONTFAMILY_DEFAULT, wxFONTSTYLE_NORMAL, wxFONTWEIGHT_NORMAL);
 
    // Figure out the x-position of each field and label in the box
    x = mBorderLeft;
@@ -1382,8 +1370,7 @@ bool NumericTextCtrl::Layout()
 
    wxBrush Brush;
 
-   delete mBackgroundBitmap; // Delete placeholder
-   mBackgroundBitmap = new wxBitmap(mWidth + mButtonWidth, mHeight);
+   mBackgroundBitmap = std::make_unique<wxBitmap>(mWidth + mButtonWidth, mHeight);
    memDC.SelectObject(*mBackgroundBitmap);
 
    memDC.SetBrush(*wxLIGHT_GREY_BRUSH);
@@ -1679,6 +1666,7 @@ void NumericTextCtrl::OnKeyDown(wxKeyEvent &event)
       }
       mValueString[digitPosition] = wxChar(keyCode);
       ControlsToValue();
+      Refresh();// Force an update of the control. [Bug 1497]
       ValueToControls();
       mFocusedDigit = (mFocusedDigit + 1) % (mDigits.GetCount());
       Updated();
@@ -1698,6 +1686,7 @@ void NumericTextCtrl::OnKeyDown(wxKeyEvent &event)
       if (theDigit != wxChar('-'))
          theDigit = '0';
       ControlsToValue();
+      Refresh();// Force an update of the control. [Bug 1497]
       ValueToControls();
       Updated();
    }
@@ -1736,9 +1725,21 @@ void NumericTextCtrl::OnKeyDown(wxKeyEvent &event)
    }
 
    else if (keyCode == WXK_TAB) {
+#if defined(__WXMSW__)
+      // Using Navigate() on Windows, rather than the following code causes
+      // bug 1542
+      wxWindow* parent = GetParent();
+      wxNavigationKeyEvent nevent;
+      nevent.SetWindowChange(event.ControlDown());
+      nevent.SetDirection(!event.ShiftDown());
+      nevent.SetEventObject(parent);
+      nevent.SetCurrentFocus(parent);
+      GetParent()->GetEventHandler()->ProcessEvent(nevent);
+#else
       Navigate(event.ShiftDown()
                ? wxNavigationKeyEvent::IsBackward
                : wxNavigationKeyEvent::IsForward);
+#endif
    }
 
    else if (keyCode == WXK_RETURN || keyCode == WXK_NUMPAD_ENTER) {
@@ -1761,7 +1762,7 @@ void NumericTextCtrl::OnKeyDown(wxKeyEvent &event)
    }
 }
 
-void NumericTextCtrl::SetFieldFocus(int digit)
+void NumericTextCtrl::SetFieldFocus(int  digit)
 {
 #if wxUSE_ACCESSIBILITY
    if (mDigits.GetCount() == 0)
@@ -1814,8 +1815,19 @@ void NumericTextCtrl::Updated(bool keyup /* = false */)
 
 void NumericTextCtrl::ValueToControls()
 {
+   const wxString previousValueString = mValueString;
    NumericConverter::ValueToControls(mValue);
-   Refresh(false);
+   if (mValueString != previousValueString) {
+      // Doing this only when needed is an optimization.
+      // NumerixTextCtrls are used in the selection bar at the bottom
+      // of Audacity, and are updated at high frequency through
+      // SetValue() when Audacity is playing. This consumes a
+      // significant amount of CPU. Typically, when a track is
+      // playing, only one of the NumericTextCtrl actually changes
+      // (the audio position). We save CPU by updating the control
+      // only when needed.
+      Refresh(false);
+   }
 }
 
 

@@ -33,6 +33,8 @@ using std::isinf;
 
 namespace std {
    using std::tr1::shared_ptr;
+   using std::tr1::weak_ptr;
+   using std::tr1::static_pointer_cast;
    using std::tr1::remove_reference;
 
    template<typename X> struct default_delete
@@ -45,7 +47,9 @@ namespace std {
       {
          // Break compilation if Y* does not convert to X*
          // I should figure out the right use of enable_if instead
-         static_assert((static_cast<X*>((Y*){}), true),
+         // Note: YPtr avoids bogus compiler warning for C99 compound literals
+         using YPtr = Y*;
+         static_assert((static_cast<X*>(YPtr{}), true),
                        "Pointer types not convertible");
       }
       
@@ -185,6 +189,12 @@ namespace std {
          }
       }
 
+      void swap(unique_ptr& that)
+      {
+         std::swap(p, that.p);
+         std::swap(get_deleter(), that.get_deleter());
+      }
+
    private:
       T *p{};
    };
@@ -259,6 +269,12 @@ namespace std {
          {
             get_deleter()(old__p);
          }
+      }
+
+      void swap(unique_ptr& that)
+      {
+         std::swap(p, that.p);
+         std::swap(get_deleter(), that.get_deleter());
       }
 
    private:
@@ -366,7 +382,7 @@ you don't use something like std::move(p) or q.release().  Both expressions requ
 that you identify the type only once, which is brief and less error prone.
 
 (Whereas this omission of [] might invite a runtime error:
-std::unique_ptr<Myclass> q { new Myclass[count] }; )
+std::unique_ptr<Myclass> q { safenew Myclass[count] }; )
 
 Some C++11 tricks needed here are (1) variadic argument lists and
 (2) making the compile-time dispatch work correctly.  You can't have
@@ -497,7 +513,7 @@ public:
  * with *, ->, get(), reset(), or in if()
  */
 
-// Placement-new is used below, and that does not cooperate with the DEBUG_NEW for Visual Studio
+// Placement-NEW is used below, and that does not cooperate with the DEBUG_NEW for Visual Studio
 #ifdef _DEBUG
 #ifdef _MSC_VER
 #undef new
@@ -556,7 +572,7 @@ public:
    {
       // Lose any old value
       reset();
-      // Create new value
+      // Create NEW value
       pp = safenew(address()) X(std::forward<Args>(args)...);
    }
 
@@ -658,15 +674,42 @@ public:
    movable_ptr_with_deleter() {};
    movable_ptr_with_deleter(T* p, const Deleter &d)
       : movable_ptr_with_deleter_base<T, Deleter>( p, d ) {}
-   movable_ptr_with_deleter(const movable_ptr_with_deleter &that) = default;
+
+#ifdef __AUDACITY_OLD_STD__
+
+   // copy
+   movable_ptr_with_deleter(const movable_ptr_with_deleter &that)
+      : movable_ptr_with_deleter_base < T, Deleter > ( that )
+   {
+   }
+
+   movable_ptr_with_deleter &operator= (const movable_ptr_with_deleter& that)
+   {
+      if (this != &that) {
+         ((movable_ptr_with_deleter_base<T, Deleter>&)(*this)) =
+            that;
+      }
+      return *this;
+   }
+
+#else
+
+   // move
+   movable_ptr_with_deleter(movable_ptr_with_deleter &&that)
+      : movable_ptr_with_deleter_base < T, Deleter > ( std::move(that) )
+   {
+   }
+
    movable_ptr_with_deleter &operator= (movable_ptr_with_deleter&& that)
    {
       if (this != &that) {
          ((movable_ptr_with_deleter_base<T, Deleter>&)(*this)) =
-            std::move(that);
+         std::move(that);
       }
       return *this;
    }
+
+#endif
 };
 
 template<typename T, typename Deleter, typename... Args>
@@ -675,6 +718,22 @@ make_movable_with_deleter(const Deleter &d, Args&&... args)
 {
    return movable_ptr_with_deleter<T, Deleter>(safenew T(std::forward<Args>(args)...), d);
 }
+
+/*
+ * A deleter class to supply the second template parameter of unique_ptr for
+ * classes like wxWindow that should be sent a message called Destroy rather
+ * than be deleted directly
+ */
+template <typename T>
+struct Destroyer {
+   void operator () (T *p) const { if (p) p->Destroy(); }
+};
+
+/*
+ * a convenience for using Destroyer
+ */
+template <typename T>
+using Destroy_ptr = std::unique_ptr<T, Destroyer<T>>;
 
 /*
  * "finally" as in The C++ Programming Language, 4th ed., p. 358
@@ -698,5 +757,17 @@ Final_action<F> finally (F f)
 {
    return Final_action<F>(f);
 }
+
+/*
+ * A convenience for use with range-for
+ */
+template <typename Iterator>
+struct IteratorRange : public std::pair<Iterator, Iterator> {
+   IteratorRange (Iterator &&a, Iterator &&b)
+      : std::pair<Iterator, Iterator> ( std::move(a), std::move(b) ) {}
+
+   Iterator begin() const { return this->first; }
+   Iterator end() const { return this->second; }
+};
 
 #endif // __AUDACITY_MEMORY_X_H__

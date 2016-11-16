@@ -218,7 +218,7 @@ bool EffectChangeSpeed::Process()
    CopyInputTracks(Track::All); // Set up mOutputTracks.
    bool bGoodResult = true;
 
-   TrackListIterator iter(mOutputTracks);
+   TrackListIterator iter(mOutputTracks.get());
    Track* t;
    mCurTrackNum = 0;
    mMaxNewLength = 0.0;
@@ -231,7 +231,7 @@ bool EffectChangeSpeed::Process()
       if (t->GetKind() == Track::Label) {
          if (t->GetSelected() || t->IsSyncLockSelected())
          {
-            if (!ProcessLabelTrack(t)) {
+            if (!ProcessLabelTrack(static_cast<LabelTrack*>(t))) {
                bGoodResult = false;
                break;
             }
@@ -252,8 +252,8 @@ bool EffectChangeSpeed::Process()
          // Process only if the right marker is to the right of the left marker
          if (mCurT1 > mCurT0) {
             //Transform the marker timepoints to samples
-            sampleCount start = pOutWaveTrack->TimeToLongSamples(mCurT0);
-            sampleCount end = pOutWaveTrack->TimeToLongSamples(mCurT1);
+            auto start = pOutWaveTrack->TimeToLongSamples(mCurT0);
+            auto end = pOutWaveTrack->TimeToLongSamples(mCurT1);
 
             //ProcessOne() (implemented below) processes a single track
             if (!ProcessOne(pOutWaveTrack, start, end))
@@ -453,13 +453,11 @@ bool EffectChangeSpeed::TransferDataFromWindow()
 
 // Labels are time-scaled linearly inside the affected region, and labels after
 // the region are shifted along according to how the region size changed.
-bool EffectChangeSpeed::ProcessLabelTrack(Track *t)
+bool EffectChangeSpeed::ProcessLabelTrack(LabelTrack *lt)
 {
-   SetTimeWarper(new RegionTimeWarper(mT0, mT1,
-                     new LinearTimeWarper(mT0, mT0,
+   SetTimeWarper(std::make_unique<RegionTimeWarper>(mT0, mT1,
+                     std::make_unique<LinearTimeWarper>(mT0, mT0,
                          mT1, mT0 + (mT1-mT0)*mFactor)));
-   LabelTrack *lt = (LabelTrack*)t;
-   if (lt == NULL) return false;
    lt->WarpLabels(*GetTimeWarper());
    return true;
 }
@@ -481,16 +479,16 @@ bool EffectChangeSpeed::ProcessOne(WaveTrack * track,
    //Get the length of the selection (as double). len is
    //used simple to calculate a progress meter, so it is easier
    //to make it a double now than it is to do it later
-   double len = (double)(end - start);
+   auto len = (end - start).as_double();
 
    // Initiate processing buffers, most likely shorter than
    // the length of the selection being processed.
-   sampleCount inBufferSize = track->GetMaxBlockSize();
+   auto inBufferSize = track->GetMaxBlockSize();
 
    float * inBuffer = new float[inBufferSize];
 
-   sampleCount outBufferSize =
-      (sampleCount)((mFactor * inBufferSize) + 10);
+   // mFactor is at most 100-fold so this shouldn't overflow size_t
+   auto outBufferSize = size_t( mFactor * inBufferSize + 10 );
    float * outBuffer = new float[outBufferSize];
 
    // Set up the resampling stuff for this track.
@@ -499,41 +497,34 @@ bool EffectChangeSpeed::ProcessOne(WaveTrack * track,
    //Go through the track one buffer at a time. samplePos counts which
    //sample the current buffer starts at.
    bool bResult = true;
-   sampleCount blockSize;
-   sampleCount samplePos = start;
+   auto samplePos = start;
    while (samplePos < end) {
       //Get a blockSize of samples (smaller than the size of the buffer)
-      blockSize = track->GetBestBlockSize(samplePos);
-
-      //Adjust the block size if it is the final block in the track
-      if (samplePos + blockSize > end)
-         blockSize = end - samplePos;
+      auto blockSize = limitSampleBufferSize(
+         track->GetBestBlockSize(samplePos),
+         end - samplePos
+      );
 
       //Get the samples from the track and put them in the buffer
       track->Get((samplePtr) inBuffer, floatSample, samplePos, blockSize);
 
-      int inUsed;
-      int outgen = resample.Process(mFactor,
+      const auto results = resample.Process(mFactor,
                                     inBuffer,
                                     blockSize,
                                     ((samplePos + blockSize) >= end),
-                                    &inUsed,
                                     outBuffer,
                                     outBufferSize);
-      if (outgen < 0) {
-         bResult = false;
-         break;
-      }
+      const auto outgen = results.second;
 
       if (outgen > 0)
          outputTrack->Append((samplePtr)outBuffer, floatSample,
                              outgen);
 
       // Increment samplePos
-      samplePos += inUsed;
+      samplePos += results.first;
 
       // Update the Progress meter
-      if (TrackProgress(mCurTrackNum, (samplePos - start) / len)) {
+      if (TrackProgress(mCurTrackNum, (samplePos - start).as_double() / len)) {
          bResult = false;
          break;
       }
@@ -551,7 +542,7 @@ bool EffectChangeSpeed::ProcessOne(WaveTrack * track,
    double newLength = outputTrack->GetEndTime();
    if (bResult)
    {
-      SetTimeWarper(new LinearTimeWarper(mCurT0, mCurT0, mCurT1, mCurT0 + newLength));
+      SetTimeWarper(std::make_unique<LinearTimeWarper>(mCurT0, mCurT0, mCurT1, mCurT0 + newLength));
       bResult = track->ClearAndPaste(mCurT0, mCurT1, outputTrack.get(), true, false, GetTimeWarper());
    }
 

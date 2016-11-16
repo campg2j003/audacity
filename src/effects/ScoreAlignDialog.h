@@ -26,7 +26,7 @@ void CloseScoreAlignDialog();
 
 // Declare window functions
 
-class ScoreAlignDialog final : public wxDialog
+class ScoreAlignDialog final : public wxDialogWrapper
 {
 public:
    ScoreAlignParams p;
@@ -61,7 +61,7 @@ public:
    wxButton *mDefaultButton;
 
    // constructors and destructors
-   ScoreAlignDialog(wxWindow * parent, ScoreAlignParams &params);
+   ScoreAlignDialog(ScoreAlignParams &params);
    ~ScoreAlignDialog();
 
    bool TransferDataFromWindow();

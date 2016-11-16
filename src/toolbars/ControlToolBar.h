@@ -14,6 +14,7 @@
 #ifndef __AUDACITY_CONTROL_TOOLBAR__
 #define __AUDACITY_CONTROL_TOOLBAR__
 
+#include "../MemoryX.h"
 #include "ToolBar.h"
 #include "../Theme.h"
 
@@ -62,7 +63,7 @@ class ControlToolBar final : public ToolBar {
 
    // Choice among the appearances of the play button:
    enum class PlayAppearance {
-      Straight, Looped, CutPreview, Scrub
+      Straight, Looped, CutPreview, Scrub, Seek
    };
 
    //These allow buttons to be controlled externally:
@@ -101,10 +102,15 @@ class ControlToolBar final : public ToolBar {
    void EnableDisableButtons() override;
 
    void ReCreateButtons() override;
-   void RegenerateToolsTooltips();
+   void RegenerateTooltips() override;
 
    int WidthForStatusBar(wxStatusBar* const);
    void UpdateStatusBar(AudacityProject *pProject);
+
+   // Starting and stopping of scrolling display
+   void StartScrollingIfPreferred();
+   void StartScrolling();
+   void StopScrolling();
 
  private:
 
@@ -155,7 +161,7 @@ class ControlToolBar final : public ToolBar {
 
    wxBoxSizer *mSizer;
 
-   TrackList* mCutPreviewTracks;
+   std::unique_ptr<TrackList> mCutPreviewTracks;
 
    // strings for status bar
    wxString mStatePlay;
@@ -165,8 +171,8 @@ class ControlToolBar final : public ToolBar {
 
  public:
 
-   DECLARE_CLASS(ControlToolBar);
-   DECLARE_EVENT_TABLE();
+   DECLARE_CLASS(ControlToolBar)
+   DECLARE_EVENT_TABLE()
 };
 
 #endif

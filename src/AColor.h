@@ -66,6 +66,7 @@ class AColor {
    static void Line(wxDC & dc, wxCoord x1, wxCoord y1, wxCoord x2, wxCoord y2);
    static void DrawFocus(wxDC & dc, wxRect & r);
    static void Bevel(wxDC & dc, bool up, const wxRect & r);
+   static void Bevel2(wxDC & dc, bool up, const wxRect & r);
    static void BevelTrackInfo(wxDC & dc, bool up, const wxRect & r);
    static wxColour Blend(const wxColour & c1, const wxColour & c2);
 
@@ -147,10 +148,9 @@ class AColor {
 inline void GetColorGradient(float value,
                              AColor::ColorGradientChoice selected,
                              bool grayscale,
-                             unsigned char *red,
-                             unsigned char *green, unsigned char *blue) {
-   if (!AColor::gradient_inited)
-      AColor::PreComputeGradient();
+                             unsigned char * __restrict red,
+                             unsigned char * __restrict green,
+                             unsigned char * __restrict blue) {
 
    int idx = value * (AColor::gradientSteps - 1);
 

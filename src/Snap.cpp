@@ -8,6 +8,7 @@
 
 **********************************************************************/
 
+#include "Audacity.h"
 #include "Snap.h"
 
 #include <algorithm>
@@ -20,11 +21,27 @@
 
 #include <wx/arrimpl.cpp>
 
-WX_DEFINE_USER_EXPORTED_OBJARRAY(TrackClipArray);
-
 inline bool operator < (SnapPoint s1, SnapPoint s2)
 {
    return s1.t < s2.t;
+}
+
+TrackClip::TrackClip(Track *t, WaveClip *c)
+{
+   track = origTrack = t;
+   dstTrack = NULL;
+   clip = c;
+}
+
+#ifndef __AUDACITY_OLD_STD__
+TrackClip::TrackClip(TrackClip&& tc)
+   : track{tc.track}, origTrack{tc.origTrack}, dstTrack{tc.dstTrack},
+   clip{tc.clip}, holder{std::move(tc.holder)} {}
+#endif
+
+TrackClip::~TrackClip()
+{
+
 }
 
 SnapManager::SnapManager(TrackList *tracks,
@@ -95,7 +112,9 @@ void SnapManager::Reinit()
    TrackListIterator iter(mTracks);
    for (Track *track = iter.First();  track; track = iter.Next())
    {
-      if (mTrackExclusions && mTrackExclusions->Index(track) != wxNOT_FOUND)
+      if (mTrackExclusions &&
+          mTrackExclusions->end() !=
+          std::find(mTrackExclusions->begin(), mTrackExclusions->end(), track))
       {
          continue;
       }
@@ -117,18 +136,16 @@ void SnapManager::Reinit()
       }
       else if (track->GetKind() == Track::Wave)
       {
-         WaveTrack *waveTrack = (WaveTrack *)track;
-         WaveClipList::compatibility_iterator it;
-         for (it = waveTrack->GetClipIterator(); it; it = it->GetNext())
+         auto waveTrack = static_cast<const WaveTrack *>(track);
+         for (const auto &clip: waveTrack->GetClips())
          {
-            WaveClip *clip = it->GetData();
             if (mClipExclusions)
             {
                bool skip = false;
-               for (size_t j = 0, cnt = mClipExclusions->GetCount(); j < cnt; ++j)
+               for (size_t j = 0, cnt = mClipExclusions->size(); j < cnt; ++j)
                {
-                  if (mClipExclusions->Item(j).track == waveTrack &&
-                      mClipExclusions->Item(j).clip == clip)
+                  if ((*mClipExclusions)[j].track == waveTrack &&
+                      (*mClipExclusions)[j].clip == clip.get())
                   {
                      skip = true;
                      break;
@@ -159,7 +176,7 @@ void SnapManager::Reinit()
 }
 
 // Adds to mSnapPoints, filtering by TimeConverter
-void SnapManager::CondListAdd(double t, Track *track)
+void SnapManager::CondListAdd(double t, const Track *track)
 {
    if (mSnapToTime)
    {
@@ -274,7 +291,10 @@ bool SnapManager::SnapToPoints(Track *currentTrack,
       return true;
    }
 
-   size_t indexInThisTrack = -1;
+   // indexInThisTrack is ONLY used if count > 0
+   // and is initialised then, so we can 'initialise' it
+   // to anything to keep compiler quiet.
+   size_t indexInThisTrack = left;
    size_t countInThisTrack = 0;
    for (i = left; i <= right; ++i)
    {

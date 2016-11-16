@@ -29,8 +29,8 @@ wxString CompareAudioCommandType::BuildName()
 
 void CompareAudioCommandType::BuildSignature(CommandSignature &signature)
 {
-   DoubleValidator *thresholdValidator = new DoubleValidator();
-   signature.AddParameter(wxT("Threshold"), 0.0, thresholdValidator);
+   auto thresholdValidator = make_movable<DoubleValidator>();
+   signature.AddParameter(wxT("Threshold"), 0.0, std::move(thresholdValidator));
 }
 
 CommandHolder CompareAudioCommandType::Create(std::unique_ptr<CommandOutputTarget> &&target)
@@ -98,28 +98,25 @@ bool CompareAudioCommand::Apply(CommandExecutionContext context)
    double errorThreshold = GetDouble(wxT("Threshold"));
 
    // Initialize buffers for track data to be analyzed
-   int buffSize = min(mTrack0->GetMaxBlockSize(), mTrack1->GetMaxBlockSize());
+   auto buffSize = std::min(mTrack0->GetMaxBlockSize(), mTrack1->GetMaxBlockSize());
    float *buff0 = new float[buffSize];
    float *buff1 = new float[buffSize];
 
    // Compare tracks block by block
-   long s0 = mTrack0->TimeToLongSamples(mT0);
-   long s1 = mTrack0->TimeToLongSamples(mT1);
-   long position = s0;
-   long length = s1 - s0;
+   auto s0 = mTrack0->TimeToLongSamples(mT0);
+   auto s1 = mTrack0->TimeToLongSamples(mT1);
+   auto position = s0;
+   auto length = s1 - s0;
    while (position < s1)
    {
       // Get a block of data into the buffers
-      sampleCount block = mTrack0->GetBestBlockSize(position);
-      if (position + block > s1)
-      {
-         block = s1 - position;
-      }
+      auto block = limitSampleBufferSize(
+         mTrack0->GetBestBlockSize(position), s1 - position
+      );
       mTrack0->Get((samplePtr)buff0, floatSample, position, block);
       mTrack1->Get((samplePtr)buff1, floatSample, position, block);
 
-      int buffPos = 0;
-      for (buffPos = 0; buffPos < block; ++buffPos)
+      for (decltype(block) buffPos = 0; buffPos < block; ++buffPos)
       {
          if (CompareSample(buff0[buffPos], buff1[buffPos]) > errorThreshold)
          {
@@ -128,7 +125,10 @@ bool CompareAudioCommand::Apply(CommandExecutionContext context)
       }
 
       position += block;
-      Progress((position - mT0) / length);
+      Progress(
+         (position - s0).as_double() /
+         length.as_double()
+      );
    }
 
    delete [] buff0;

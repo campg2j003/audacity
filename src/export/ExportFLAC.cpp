@@ -47,7 +47,7 @@ and libvorbis examples, Monty <monty@xiph.org>
 // ExportFLACOptions Class
 //----------------------------------------------------------------------------
 
-class ExportFLACOptions final : public wxPanel
+class ExportFLACOptions final : public wxPanelWrapper
 {
 public:
 
@@ -62,7 +62,7 @@ public:
 ///
 ///
 ExportFLACOptions::ExportFLACOptions(wxWindow *parent, int WXUNUSED(format))
-:  wxPanel(parent, wxID_ANY)
+:  wxPanelWrapper(parent, wxID_ANY)
 {
    ShuttleGui S(this, eIsCreatingFromPrefs);
    PopulateOrExchange(S);
@@ -183,7 +183,7 @@ public:
 
    wxWindow *OptionsCreate(wxWindow *parent, int format);
    int Export(AudacityProject *project,
-               int channels,
+               unsigned channels,
                const wxString &fName,
                bool selectedOnly,
                double t0,
@@ -213,7 +213,7 @@ ExportFLAC::ExportFLAC()
 }
 
 int ExportFLAC::Export(AudacityProject *project,
-                        int numChannels,
+                        unsigned numChannels,
                         const wxString &fName,
                         bool selectionOnly,
                         double t0,
@@ -311,7 +311,7 @@ int ExportFLAC::Export(AudacityProject *project,
                             numChannels, SAMPLES_PER_RUN, false,
                             rate, format, true, mixerSpec);
 
-   int i, j;
+   int i;
    FLAC__int32 **tmpsmplbuf = new FLAC__int32*[numChannels];
    for (i = 0; i < numChannels; i++) {
       tmpsmplbuf[i] = (FLAC__int32 *) calloc(SAMPLES_PER_RUN, sizeof(FLAC__int32));
@@ -324,7 +324,7 @@ int ExportFLAC::Export(AudacityProject *project,
          _("Exporting the entire project as FLAC"));
 
       while (updateResult == eProgressSuccess) {
-         sampleCount samplesThisRun = mixer->Process(SAMPLES_PER_RUN);
+         auto samplesThisRun = mixer->Process(SAMPLES_PER_RUN);
          if (samplesThisRun == 0) { //stop encoding
             break;
          }
@@ -332,12 +332,12 @@ int ExportFLAC::Export(AudacityProject *project,
             for (i = 0; i < numChannels; i++) {
                samplePtr mixed = mixer->GetBuffer(i);
                if (format == int24Sample) {
-                  for (j = 0; j < samplesThisRun; j++) {
+                  for (decltype(samplesThisRun) j = 0; j < samplesThisRun; j++) {
                      tmpsmplbuf[i][j] = ((int *)mixed)[j];
                   }
                }
                else {
-                  for (j = 0; j < samplesThisRun; j++) {
+                  for (decltype(samplesThisRun) j = 0; j < samplesThisRun; j++) {
                      tmpsmplbuf[i][j] = ((short *)mixed)[j];
                   }
                }

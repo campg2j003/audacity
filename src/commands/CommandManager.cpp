@@ -149,23 +149,33 @@ public:
                   wxKeyEvent wxevent([event type] == NSKeyDown ? wxEVT_KEY_DOWN : wxEVT_KEY_UP);
                   impl->SetupKeyEvent(wxevent, event);
 
+                  NSEvent *result;
                   if ([event type] == NSKeyDown)
                   {
                      wxKeyEvent eventHook(wxEVT_CHAR_HOOK, wxevent);
-                     return FilterEvent(eventHook) == Event_Processed ? nil : event;
+                     result = FilterEvent(eventHook) == Event_Processed ? nil : event;
                   }
                   else
                   {
-                     return FilterEvent(wxevent) == Event_Processed ? nil : event;
+                     result = FilterEvent(wxevent) == Event_Processed ? nil : event;
                   }
+
+                  mEvent = nullptr;
+                  return result;
                }
             }
 
             return event;
          }
       ];
-#else
+
+      // Bug1252: must also install this filter with wxWidgets, else
+      // we don't intercept command keys when focus is in a combo box.
       wxEvtHandler::AddFilter(this);
+#else
+
+      wxEvtHandler::AddFilter(this);
+
 #endif
    }
 
@@ -178,7 +188,7 @@ public:
 #endif
    }
 
-   int FilterEvent(wxEvent& event)
+   int FilterEvent(wxEvent& event) override
    {
       // Quickly bail if this isn't something we want.
       wxEventType type = event.GetEventType();
@@ -317,6 +327,15 @@ private:
                                      
 #elif defined(__WXMAC__)
 
+      if (!mEvent) {
+         // TODO:  we got here without getting the NSEvent pointer,
+         // as in the combo box case of bug 1252.  We can't compute it!
+         // This makes a difference only when there is a capture handler.
+         // It's never the case yet that there is one.
+         wxASSERT(false);
+         return chars;
+      }
+
       NSString *c = [mEvent charactersIgnoringModifiers];
       if ([c length] == 1)
       {
@@ -382,7 +401,7 @@ private:
 
 #if defined(__WXMAC__)   
    id mHandler;
-   NSEvent *mEvent;
+   NSEvent *mEvent {};
    UInt32 mDeadKeyState;
 #endif
 
@@ -394,7 +413,6 @@ private:
 CommandManager::CommandManager():
    mCurrentID(17000),
    mCurrentMenuName(COMMAND),
-   mCurrentMenu(NULL),
    mDefaultFlags(AlwaysEnabledFlag),
    mDefaultMask(AlwaysEnabledFlag)
 {
@@ -423,7 +441,6 @@ void CommandManager::PurgeData()
    mCommandKeyHash.clear();
    mCommandIDHash.clear();
 
-   mCurrentMenu = NULL;
    mCurrentMenuName = COMMAND;
    mCurrentID = 0;
 }
@@ -485,9 +502,8 @@ wxMenuBar * CommandManager::CurrentMenuBar() const
 ///
 void CommandManager::BeginMenu(const wxString & tName)
 {
-   wxMenu *tmpMenu = new wxMenu();
-
-   mCurrentMenu = tmpMenu;
+   uCurrentMenu = std::make_unique<wxMenu>();
+   mCurrentMenu = uCurrentMenu.get();
    mCurrentMenuName = tName;
 }
 
@@ -500,8 +516,9 @@ void CommandManager::EndMenu()
    // Add the menu to the menubar after all menu items have been
    // added to the menu to allow OSX to rearrange special menu
    // items like Preferences, About, and Quit.
-   CurrentMenuBar()->Append(mCurrentMenu, mCurrentMenuName);
-   mCurrentMenu = NULL;
+   wxASSERT(uCurrentMenu);
+   CurrentMenuBar()->Append(uCurrentMenu.release(), mCurrentMenuName);
+   mCurrentMenu = nullptr;
    mCurrentMenuName = COMMAND;
 }
 
@@ -511,14 +528,10 @@ void CommandManager::EndMenu()
 /// the function's argument.
 wxMenu* CommandManager::BeginSubMenu(const wxString & tName)
 {
-   const auto result = new wxMenu{};
-#ifdef __AUDACITY_OLD_STD__
-   mSubMenuList.push_back(SubMenuListEntry{ tName, result });
-#else
-   mSubMenuList.emplace_back(tName, result);
-#endif
+   mSubMenuList.push_back
+      (make_movable< SubMenuListEntry > ( tName, std::make_unique<wxMenu>() ));
    mbSeparatorAllowed = false;
-   return result;
+   return mSubMenuList.back()->menu.get();
 }
 
 
@@ -529,13 +542,14 @@ wxMenu* CommandManager::BeginSubMenu(const wxString & tName)
 void CommandManager::EndSubMenu()
 {
    //Save the submenu's information
-   SubMenuListEntry tmpSubMenu = mSubMenuList.back();
+   SubMenuListEntry tmpSubMenu { std::move( *mSubMenuList.back() ) };
 
    //Pop off the NEW submenu so CurrentMenu returns the parent of the submenu
    mSubMenuList.pop_back();
 
    //Add the submenu to the current menu
-   CurrentMenu()->Append(0, tmpSubMenu.name, tmpSubMenu.menu, tmpSubMenu.name);
+   CurrentMenu()->Append
+      (0, tmpSubMenu.name, tmpSubMenu.menu.release(), tmpSubMenu.name);
    mbSeparatorAllowed = true;
 }
 
@@ -548,7 +562,7 @@ wxMenu * CommandManager::CurrentSubMenu() const
    if(mSubMenuList.empty())
       return NULL;
 
-   return mSubMenuList.back().menu;
+   return mSubMenuList.back()->menu.get();
 }
 
 ///
@@ -568,6 +582,26 @@ wxMenu * CommandManager::CurrentMenu() const
    }
 
    return tmpCurrentSubMenu;
+}
+
+void CommandManager::SetCurrentMenu(wxMenu * menu)
+{
+   // uCurrentMenu ought to be null in correct usage
+   wxASSERT(!uCurrentMenu);
+   // Make sure of it anyway
+   uCurrentMenu.reset();
+
+   mCurrentMenu = menu;
+}
+
+void CommandManager::ClearCurrentMenu()
+{
+   // uCurrentMenu ought to be null in correct usage
+   wxASSERT(!uCurrentMenu);
+   // Make sure of it anyway
+   uCurrentMenu.reset();
+
+   mCurrentMenu = nullptr;
 }
 
 ///
@@ -815,7 +849,7 @@ CommandListEntry *CommandManager::NewIdentifier(const wxString & name,
 
       wxString labelPrefix;
       if (!mSubMenuList.empty()) {
-         labelPrefix = mSubMenuList.back().name;
+         labelPrefix = mSubMenuList.back()->name;
       }
 
       // wxMac 2.5 and higher will do special things with the
@@ -1046,13 +1080,13 @@ void CommandManager::TellUserWhyDisallowed( CommandFlag flagsGot, CommandMask fl
 
    auto missingFlags = flagsRequired & (~flagsGot );
    if( missingFlags & AudioIONotBusyFlag )
-      reason = _("You can only do this when playing and recording are\n stopped. (Pausing is not sufficient.)");
+      reason = _("You can only do this when playing and recording are\nstopped. (Pausing is not sufficient.)");
    else if( missingFlags & StereoRequiredFlag )
-      reason = _("You must first select some stereo audio for this\n to use. (You cannot use this with mono.)");
+      reason = _("You must first select some stereo audio to perform this\naction. (You cannot use this with mono.)");
    else if( missingFlags & TimeSelectedFlag )
-      reason = _("You must first select some audio for this to use.");
+      reason = _("You must first select some audio to perform this action.");
    else if( missingFlags & WaveTracksSelectedFlag)
-      reason = _("You must first select some audio for this\n to use. (Selecting other kinds of track won't work.)");
+      reason = _("You must first select some audio to perform this action.\n(Selecting other kinds of track won't work.)");
    // If the only thing wrong was no tracks, we do nothing and don't report a problem
    else if( missingFlags == TracksExistFlag )
       return;

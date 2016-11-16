@@ -100,12 +100,20 @@ public:
    int frequencyGain;
 
    int windowType;
+
+private:
    int windowSize;
+public:
+   size_t WindowSize() const { return windowSize; }
+
 #ifdef EXPERIMENTAL_ZERO_PADDED_SPECTROGRAMS
+private:
    int zeroPaddingFactor;
+public:
+   size_t ZeroPaddingFactor() const { return zeroPaddingFactor; }
 #endif
 
-   int GetFFTLength() const; // window size (times zero padding, if STFT)
+   size_t GetFFTLength() const; // window size (times zero padding, if STFT)
 
    bool isGrayscale;
 
@@ -137,7 +145,6 @@ public:
 
    // Following fields are derived from preferences.
 
-#ifdef EXPERIMENTAL_USE_REALFFTF
    // Variables used for computing the spectrum
    mutable FFTParam      *hFFT{};
    mutable float         *window{};
@@ -145,7 +152,5 @@ public:
    // Two other windows for computing reassigned spectrogram
    mutable float         *tWindow{}; // Window times time parameter
    mutable float         *dWindow{}; // Derivative of window
-
-#endif
 };
 #endif

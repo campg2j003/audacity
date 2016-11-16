@@ -13,12 +13,18 @@
 
 #if defined(USE_LV2)
 
+#include <cmath>
+
 #include <wx/button.h>
 #include <wx/choice.h>
 #include <wx/dcbuffer.h>
 #include <wx/dialog.h>
 #include <wx/dynarray.h>
-#include <wx/math.h>
+
+#ifdef __WXMAC__
+#include <wx/evtloop.h>
+#endif
+
 #include <wx/msgdlg.h>
 #include <wx/sizer.h>
 #include <wx/statbox.h>
@@ -31,6 +37,7 @@
 #include "../../Internat.h"
 #include "../../ShuttleGui.h"
 #include "../../widgets/valnum.h"
+#include "../../widgets/wxPanelWrapper.h"
 
 #include "lilv/lilv.h"
 #include "suil/suil.h"
@@ -80,7 +87,7 @@ private:
    const LV2Port & mCtrl;
    float mLastValue;
 
-   DECLARE_EVENT_TABLE();
+   DECLARE_EVENT_TABLE()
 };
 
 BEGIN_EVENT_TABLE(LV2EffectMeter, wxWindow)
@@ -118,7 +125,7 @@ void LV2EffectMeter::OnErase(wxEraseEvent & WXUNUSED(evt))
 
 void LV2EffectMeter::OnPaint(wxPaintEvent & WXUNUSED(evt))
 {
-   wxDC *dc = wxAutoBufferedPaintDCFactory(this);
+   std::unique_ptr<wxDC> dc{ wxAutoBufferedPaintDCFactory(this) };
 
    // Cache some metrics
    wxRect r = GetClientRect();
@@ -147,8 +154,6 @@ void LV2EffectMeter::OnPaint(wxPaintEvent & WXUNUSED(evt))
    dc->DrawRectangle(x, y, (w * (val / fabs(mCtrl.mMax - mCtrl.mMin))), h);
 
    mLastValue = mCtrl.mVal;
-
-   delete dc;
 }
 
 void LV2EffectMeter::OnSize(wxSizeEvent & WXUNUSED(evt))
@@ -162,7 +167,7 @@ void LV2EffectMeter::OnSize(wxSizeEvent & WXUNUSED(evt))
 //
 ///////////////////////////////////////////////////////////////////////////////
 
-class LV2EffectSettingsDialog final : public wxDialog
+class LV2EffectSettingsDialog final : public wxDialogWrapper
 {
 public:
    LV2EffectSettingsDialog(wxWindow *parent, LV2Effect *effect);
@@ -177,15 +182,15 @@ private:
    bool mUseLatency;
    bool mUseGUI;
 
-   DECLARE_EVENT_TABLE();
+   DECLARE_EVENT_TABLE()
 };
 
-BEGIN_EVENT_TABLE(LV2EffectSettingsDialog, wxDialog)
+BEGIN_EVENT_TABLE(LV2EffectSettingsDialog, wxDialogWrapper)
    EVT_BUTTON(wxID_OK, LV2EffectSettingsDialog::OnOk)
 END_EVENT_TABLE()
 
 LV2EffectSettingsDialog::LV2EffectSettingsDialog(wxWindow *parent, LV2Effect *effect)
-:  wxDialog(parent, wxID_ANY, wxString(_("LV2 Effect Settings")))
+:  wxDialogWrapper(parent, wxID_ANY, wxString(_("LV2 Effect Settings")))
 {
    mEffect = effect;
 
@@ -377,7 +382,7 @@ wxString LV2Effect::GetVendor()
 
    if (vendor.IsEmpty())
    {
-      vendor = XO("N/A");
+      vendor = XO("n/a");
    }
 
    return vendor;
@@ -390,7 +395,7 @@ wxString LV2Effect::GetVersion()
 
 wxString LV2Effect::GetDescription()
 {
-   return XO("N/A");
+   return XO("n/a");
 }
 
 // ============================================================================
@@ -557,13 +562,13 @@ bool LV2Effect::SetHost(EffectHostInterface *host)
       lilv_scale_points_free(points);
 
       // Collect the value and range info
-      ctrl.mHasLo = !wxIsNaN(minimumVals[i]);
-      ctrl.mHasHi = !wxIsNaN(maximumVals[i]);
+      ctrl.mHasLo = !std::isnan(minimumVals[i]);
+      ctrl.mHasHi = !std::isnan(maximumVals[i]);
       ctrl.mMin = ctrl.mHasLo ? minimumVals[i] : 0.0;
       ctrl.mMax = ctrl.mHasHi ? maximumVals[i] : 1.0;
       ctrl.mLo = ctrl.mMin;
       ctrl.mHi = ctrl.mMax;
-      ctrl.mDef = !wxIsNaN(defaultValues[i]) ?
+      ctrl.mDef = !std::isnan(defaultValues[i]) ?
                   defaultValues[i] :
                      ctrl.mHasLo ?
                      ctrl.mLo :
@@ -698,14 +703,14 @@ bool LV2Effect::SetHost(EffectHostInterface *host)
    return true;
 }
 
-int LV2Effect::GetAudioInCount()
+unsigned LV2Effect::GetAudioInCount()
 {
-   return (int) mAudioInputs.GetCount();
+   return mAudioInputs.GetCount();
 }
 
-int LV2Effect::GetAudioOutCount()
+unsigned LV2Effect::GetAudioOutCount()
 {
-   return (int) mAudioOutputs.GetCount();
+   return mAudioOutputs.GetCount();
 }
 
 int LV2Effect::GetMidiInCount()
@@ -718,7 +723,7 @@ int LV2Effect::GetMidiOutCount()
    return 0;
 }
 
-void LV2Effect::SetSampleRate(sampleCount rate)
+void LV2Effect::SetSampleRate(double rate)
 {
    mSampleRate = (double) rate;
 
@@ -740,7 +745,7 @@ void LV2Effect::SetSampleRate(sampleCount rate)
    }
 }
 
-sampleCount LV2Effect::SetBlockSize(sampleCount maxBlockSize)
+size_t LV2Effect::SetBlockSize(size_t maxBlockSize)
 {
    mBlockSize = (int) maxBlockSize;
 
@@ -769,13 +774,13 @@ sampleCount LV2Effect::GetLatency()
    if (mUseLatency && mLatencyPort >= 0 && !mLatencyDone)
    {
       mLatencyDone = true;
-      return mLatency;
+      return sampleCount( mLatency );
    }
 
    return 0;
 }
 
-sampleCount LV2Effect::GetTailSize()
+size_t LV2Effect::GetTailSize()
 {
    return 0;
 }
@@ -813,7 +818,7 @@ bool LV2Effect::ProcessFinalize()
    return true;
 }
 
-sampleCount LV2Effect::ProcessBlock(float **inbuf, float **outbuf, sampleCount size)
+size_t LV2Effect::ProcessBlock(float **inbuf, float **outbuf, size_t size)
 {
    for (size_t p = 0, cnt = mAudioInputs.GetCount(); p < cnt; p++)
    {
@@ -900,10 +905,10 @@ bool LV2Effect::RealtimeProcessStart()
    return true;
 }
 
-sampleCount LV2Effect::RealtimeProcess(int group,
+size_t LV2Effect::RealtimeProcess(int group,
                                        float **inbuf,
                                        float **outbuf,
-                                       sampleCount numSamples)
+                                       size_t numSamples)
 {
    wxASSERT(group >= 0 && group < (int) mSlaves.GetCount());
    wxASSERT(numSamples <= mBlockSize);
@@ -915,7 +920,7 @@ sampleCount LV2Effect::RealtimeProcess(int group,
 
    for (size_t p = 0, cnt = mAudioInputs.GetCount(); p < cnt; p++)
    {
-      for (sampleCount s = 0; s < numSamples; s++)
+      for (decltype(numSamples) s = 0; s < numSamples; s++)
       {
          mMasterIn[p][s] += inbuf[p][s];
       }
@@ -939,7 +944,7 @@ sampleCount LV2Effect::RealtimeProcess(int group,
    return numSamples;
 }
 
-bool LV2Effect::RealtimeAddProcessor(int WXUNUSED(numChannels), float sampleRate)
+bool LV2Effect::RealtimeAddProcessor(unsigned WXUNUSED(numChannels), float sampleRate)
 {
    LilvInstance *slave = InitInstance(sampleRate);
    if (!slave)
@@ -1132,6 +1137,12 @@ bool LV2Effect::HideUI()
 
 bool LV2Effect::CloseUI()
 {
+#ifdef __WXMAC__
+#ifdef __WX_EVTLOOP_BUSY_WAITING__
+   wxEventLoop::SetBusyWaiting(false);
+#endif
+#endif
+
    mParent->RemoveEventHandler(this);
 
    if (mSliders)
@@ -1449,8 +1460,10 @@ bool LV2Effect::BuildFancy()
    }
 
    // Use a panel to host the plugins GUI
-   mContainer = safenew wxPanel(mParent, wxID_ANY);
-   if (!mContainer)
+   // container is owned by mParent, but we may destroy it if there are
+   // any errors before completing the build of UI.
+   auto container = std::make_unique<wxPanelWrapper>(mParent, wxID_ANY);
+   if (!container)
    {
       lilv_uis_free(uis);
       return false;
@@ -1464,30 +1477,29 @@ bool LV2Effect::BuildFancy()
          auto hs = std::make_unique<wxBoxSizer>(wxHORIZONTAL);
          if (hs)
          {
-            si = hs->Add(mContainer, 1, wxCENTER | wxEXPAND);
+            si = hs->Add(container.get(), 1, wxCENTER | wxEXPAND);
             vs->Add(hs.release(), 0, wxCENTER);
          }
       }
 
       if (!si)
       {
-         delete mContainer;
          lilv_uis_free(uis);
          return false;
       }
 
 #if defined(__WXGTK__)
       // Make sure the parent has a window
-      if (!gtk_widget_get_window(GTK_WIDGET(mContainer->m_wxwindow)))
+      if (!gtk_widget_get_window(GTK_WIDGET(container->m_wxwindow)))
       {
-         gtk_widget_realize(GTK_WIDGET(mContainer->m_wxwindow));
+         gtk_widget_realize(GTK_WIDGET(container->m_wxwindow));
       }
 
-      mParentFeature->data = GTK_WIDGET(mContainer->GetHandle());
+      mParentFeature->data = GTK_WIDGET(container->GetHandle());
 #elif defined(__WXMSW__)
-      mParentFeature->data = mContainer->GetHandle();
+      mParentFeature->data = container->GetHandle();
 #elif defined(__WXMAC__)
-      mParentFeature->data = mContainer->GetHandle();
+      mParentFeature->data = container->GetHandle();
 #endif
 
       mInstanceAccessFeature->data = lilv_instance_get_handle(mMaster);
@@ -1497,7 +1509,6 @@ bool LV2Effect::BuildFancy()
       mSuilHost = suil_host_new(LV2Effect::suil_write_func, NULL, NULL, NULL);
       if (!mSuilHost)
       {
-         delete mContainer;
          lilv_uis_free(uis);
          return false;
       }
@@ -1520,7 +1531,6 @@ bool LV2Effect::BuildFancy()
          suil_host_free(mSuilHost);
          mSuilHost = NULL;
 
-         delete mContainer;
          return false;
       }
 
@@ -1533,7 +1543,7 @@ bool LV2Effect::BuildFancy()
       gtk_widget_set_size_request(widget, 1, 1);
       gtk_widget_set_size_request(widget, sz.width, sz.height);
 
-      wxPizza *pizza = WX_PIZZA(mContainer->m_wxwindow);
+      wxPizza *pizza = WX_PIZZA(container->m_wxwindow);
       pizza->put(widget,
          0, //gtk_pizza_get_xoffset(pizza),
          0, //gtk_pizza_get_yoffset(pizza),
@@ -1553,12 +1563,20 @@ bool LV2Effect::BuildFancy()
 #endif
 
       mParent->SetSizerAndFit(vs.release());
+      // mParent will guarantee release of the container now.
+      container.release();
    }
 
    mIdleFeature = (const LV2UI_Idle_Interface *)
       suil_instance_extension_data(mSuilInstance, LV2_UI__idleInterface);
 
    TransferDataToWindow();
+
+#ifdef __WXMAC__
+#ifdef __WX_EVTLOOP_BUSY_WAITING__
+   wxEventLoop::SetBusyWaiting(true);
+#endif
+#endif
 
    return true;
 }

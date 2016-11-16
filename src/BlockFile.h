@@ -29,19 +29,28 @@
 
 class SummaryInfo {
  public:
-   SummaryInfo(sampleCount samples);
+   SummaryInfo(size_t samples);
 
    int            fields; /* Usually 3 for Min, Max, RMS */
    sampleFormat   format;
    int            bytesPerFrame;
-   sampleCount    frames64K;
+   size_t         frames64K;
    int            offset64K;
-   sampleCount    frames256;
+   size_t         frames256;
    int            offset256;
    int            totalSummaryBytes;
 };
 
 
+
+class BlockFile;
+using BlockFilePtr = std::shared_ptr<BlockFile>;
+
+template< typename Result, typename... Args >
+inline std::shared_ptr< Result > make_blockfile (Args && ... args)
+{
+   return std::make_shared< Result > ( std::forward< Args > ( args )... );
+}
 
 class PROFILE_DLL_API BlockFile /* not final, abstract */ {
  public:
@@ -49,14 +58,16 @@ class PROFILE_DLL_API BlockFile /* not final, abstract */ {
    // Constructor / Destructor
 
    /// Construct a BlockFile.
-   BlockFile(wxFileNameWrapper &&fileName, sampleCount samples);
+   BlockFile(wxFileNameWrapper &&fileName, size_t samples);
    virtual ~BlockFile();
+
+   static unsigned long gBlockFileDestructionCount;
 
    // Reading
 
    /// Retrieves audio data from this BlockFile
-   virtual int ReadData(samplePtr data, sampleFormat format,
-                        sampleCount start, sampleCount len) const = 0;
+   virtual size_t ReadData(samplePtr data, sampleFormat format,
+                        size_t start, size_t len) const = 0;
 
    // Other Properties
 
@@ -94,8 +105,8 @@ class PROFILE_DLL_API BlockFile /* not final, abstract */ {
    virtual GetFileNameResult GetFileName() const;
    virtual void SetFileName(wxFileNameWrapper &&name);
 
-   virtual sampleCount GetLength() const { return mLen; }
-   virtual void SetLength(const sampleCount newLen) { mLen = newLen; }
+   size_t GetLength() const { return mLen; }
+   void SetLength(size_t newLen) { mLen = newLen; }
 
    /// Locks this BlockFile, to prevent it from being moved
    virtual void Lock();
@@ -105,14 +116,14 @@ class PROFILE_DLL_API BlockFile /* not final, abstract */ {
    virtual bool IsLocked();
 
    /// Gets extreme values for the specified region
-   virtual void GetMinMax(sampleCount start, sampleCount len,
+   virtual void GetMinMax(size_t start, size_t len,
                           float *outMin, float *outMax, float *outRMS) const;
    /// Gets extreme values for the entire block
    virtual void GetMinMax(float *outMin, float *outMax, float *outRMS) const;
    /// Returns the 256 byte summary data block
-   virtual bool Read256(float *buffer, sampleCount start, sampleCount len);
+   virtual bool Read256(float *buffer, size_t start, size_t len);
    /// Returns the 64K summary data block
-   virtual bool Read64K(float *buffer, sampleCount start, sampleCount len);
+   virtual bool Read64K(float *buffer, size_t start, size_t len);
 
    /// Returns TRUE if this block references another disk file
    virtual bool IsAlias() const { return false; }
@@ -127,9 +138,11 @@ class PROFILE_DLL_API BlockFile /* not final, abstract */ {
    virtual bool IsSummaryBeingComputed(){return false;}
 
    /// Create a NEW BlockFile identical to this, using the given filename
-   virtual BlockFile * Copy(wxFileNameWrapper &&newFileName) = 0;
+   virtual BlockFilePtr Copy(wxFileNameWrapper &&newFileName) = 0;
 
-   virtual wxLongLong GetSpaceUsage() const = 0;
+   // Report disk space usage.
+   using DiskByteCount = unsigned long long;
+   virtual DiskByteCount GetSpaceUsage() const = 0;
 
    /// if the on-disk state disappeared, either recover it (if it was
    //summary only), write out a placeholder of silence data (missing
@@ -154,23 +167,17 @@ class PROFILE_DLL_API BlockFile /* not final, abstract */ {
 
  private:
 
-   friend class DirManager;
-   friend class AudacityApp;
-   //needed for Ref/Deref access.
-   friend class ODComputeSummaryTask;
-   friend class ODDecodeTask;
-   friend class ODPCMAliasBlockFile;
-
-   virtual void Ref() const;
-   virtual bool Deref() const;
-   virtual int RefCount(){return mRefCount;}
-
  protected:
    /// Calculate summary data for the given sample data
-   virtual void *CalcSummary(samplePtr buffer, sampleCount len,
+   /// Overrides have differing details of memory management
+   virtual void *CalcSummary(samplePtr buffer, size_t len,
                              sampleFormat format,
                              // This gets filled, if the caller needs to deallocate.  Else it is null.
                              ArrayOf<char> &cleanup);
+   // Common, nonvirtual calculation routine for the use of the above
+   void CalcSummaryFromBuffer(const float *fbuffer, size_t len,
+                              float *summary256, float *summary64K);
+
    /// Read the summary section of the file.  Derived classes implement.
    virtual bool ReadSummary(void *data) = 0;
 
@@ -180,13 +187,12 @@ class PROFILE_DLL_API BlockFile /* not final, abstract */ {
 
  private:
    int mLockCount;
-   mutable int mRefCount;
 
    static ArrayOf<char> fullSummary;
 
  protected:
    wxFileNameWrapper mFileName;
-   sampleCount mLen;
+   size_t mLen;
    SummaryInfo mSummaryInfo;
    float mMin, mMax, mRMS;
    mutable bool mSilentLog;
@@ -210,16 +216,16 @@ class AliasBlockFile /* not final */ : public BlockFile
    /// Constructs an AliasBlockFile
    AliasBlockFile(wxFileNameWrapper &&baseFileName,
                   wxFileNameWrapper &&aliasedFileName, sampleCount aliasStart,
-                  sampleCount aliasLen, int aliasChannel);
+                  size_t aliasLen, int aliasChannel);
    AliasBlockFile(wxFileNameWrapper &&existingSummaryFileName,
                   wxFileNameWrapper &&aliasedFileName, sampleCount aliasStart,
-                  sampleCount aliasLen, int aliasChannel,
+                  size_t aliasLen, int aliasChannel,
                   float min, float max, float RMS);
    virtual ~AliasBlockFile();
 
    // Reading
 
-   wxLongLong GetSpaceUsage() const override;
+   DiskByteCount GetSpaceUsage() const override;
 
    /// as SilentLog (which would affect Summary data access), but
    // applying to Alias file access
@@ -228,7 +234,7 @@ class AliasBlockFile /* not final */ : public BlockFile
    //
    // These methods are for advanced use only!
    //
-   const wxFileName &GetAliasedFileName() { return mAliasedFileName; }
+   const wxFileName &GetAliasedFileName() const { return mAliasedFileName; }
    void ChangeAliasedFileName(wxFileNameWrapper &&newAliasedFile);
    bool IsAlias() const override { return true; }
 
