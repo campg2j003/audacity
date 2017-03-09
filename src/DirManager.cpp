@@ -140,16 +140,25 @@ wxMemorySize GetFreeMemory()
 //
 
 // Behavior of RecursivelyEnumerate is tailored to our uses and not
-// entirely straightforward.  It recurs depth-first from the passed-
+// entirely straightforward.  We use it only for recursing into 
+// Audacity projects, but beware that it may be applied to a directory 
+// that contains other things too, for example a temp directory.
+// It recurses depth-first from the passed-
 // in directory into its subdirs according to optional dirspec
 // pattern, building a list of directories and (optionally) files
-// in the listed order.  The dirspec is not applied to
-// subdirs of subdirs. Files in the passed-in directory will not be
+// in the listed order.  
+// The dirspec is not applied to subdirs of subdirs. 
+// The filespec is applied to all files in subdirectories.
+// Files in the passed-in directory will not be
 // enumerated.  Also, the passed-in directory is the last entry added
 // to the list.
+// JKC: Using flag wxDIR_NO_FOLLOW to NOT follow symbolic links.
+// Directories and files inside a project should never be symbolic 
+// links, so if we find one, do not follow it.
 static int RecursivelyEnumerate(wxString dirPath,
                                   wxArrayString& filePathArray,  // output: all files in dirPath tree
                                   wxString dirspec,
+                                  wxString filespec,
                                   bool bFiles, bool bDirs,
                                   int progress_count = 0,
                                   int progress_bias = 0,
@@ -162,8 +171,10 @@ static int RecursivelyEnumerate(wxString dirPath,
    if(dir.IsOpened()){
       wxString name;
 
-      if (bFiles){
-         cont= dir.GetFirst(&name, dirspec, wxDIR_FILES);
+      // Don't delete files from a selective top level, e.g. if handed "projects*" as the 
+      // directory specifier.
+      if (bFiles && dirspec.IsEmpty() ){
+         cont= dir.GetFirst(&name, filespec, wxDIR_FILES | wxDIR_HIDDEN | wxDIR_NO_FOLLOW);
          while ( cont ){
             wxString filepath = dirPath + wxFILE_SEP_PATH + name;
 
@@ -178,11 +189,11 @@ static int RecursivelyEnumerate(wxString dirPath,
          }
       }
 
-      cont= dir.GetFirst(&name, dirspec, wxDIR_DIRS);
+      cont= dir.GetFirst(&name, dirspec, wxDIR_DIRS | wxDIR_NO_FOLLOW);
       while ( cont ){
          wxString subdirPath = dirPath + wxFILE_SEP_PATH + name;
          count += RecursivelyEnumerate(
-                     subdirPath, filePathArray, wxEmptyString,
+                     subdirPath, filePathArray, wxEmptyString,filespec,
                      bFiles, bDirs,
                      progress_count, count + progress_bias,
                      progress);
@@ -201,6 +212,7 @@ static int RecursivelyEnumerate(wxString dirPath,
 static int RecursivelyEnumerateWithProgress(wxString dirPath,
                                              wxArrayString& filePathArray, // output: all files in dirPath tree
                                              wxString dirspec,
+                                             wxString filespec,
                                              bool bFiles, bool bDirs,
                                              int progress_count,
                                              const wxChar* message)
@@ -211,7 +223,7 @@ static int RecursivelyEnumerateWithProgress(wxString dirPath,
       progress.create( _("Progress"), message );
 
    int count = RecursivelyEnumerate(
-                  dirPath, filePathArray, dirspec,
+                  dirPath, filePathArray, dirspec,filespec,
                   bFiles, bDirs,
                   progress_count, 0,
                   progress.get());
@@ -284,23 +296,58 @@ static int RecursivelyRemoveEmptyDirs(wxString dirPath,
    return nCount;
 }
 
-static void RecursivelyRemove(wxArrayString& filePathArray, int count,
-                              bool bFiles, bool bDirs,
-                              const wxChar* message = NULL)
+static void RecursivelyRemove(wxArrayString& filePathArray, int count, int bias,
+                              int flags, const wxChar* message = NULL)
 {
+   bool bFiles= (flags & kCleanFiles) != 0;
+   bool bDirs = (flags & kCleanDirs) != 0;
+   bool bDirsMustBeEmpty = (flags & kCleanDirsOnlyIfEmpty) != 0;
    Maybe<ProgressDialog> progress{};
+
 
    if (message)
       progress.create( _("Progress"), message );
 
-   for (int i = 0; i < count; i++) {
+   auto nn = filePathArray.size();
+   for (int i = 0; i < nn; i++) {
       const wxChar *file = filePathArray[i].c_str();
       if (bFiles)
          ::wxRemoveFile(file);
-      if (bDirs)
-         ::wxRmdir(file); // See note above about wxRmdir sometimes incorrectly failing on Windows.
+      if (bDirs) {
+         // continue will go to the next item, and skip
+         // attempting to delete the directory.
+         if( bDirsMustBeEmpty ){
+            wxDir dir( file );
+            if( !dir.IsOpened() )
+               continue;
+            if( dir.HasFiles() )
+               continue;
+            if( dir.HasSubDirs() )
+               continue;
+         }
+
+#ifdef __WXMSW__
+         if (!bFiles)
+            ::wxRemoveFile(file); // See note above about wxRmdir sometimes incorrectly failing on Windows.
+#endif
+
+         if (! ::wxRmdir(file) ) {
+            wxDir dir(file);
+            if(dir.IsOpened()) {
+               wxLogMessage(file + wxString(" still contains:"));
+               wxString name;
+               auto cont = dir.GetFirst(&name);
+               while ( cont ) {
+                  wxLogMessage(file + wxString(wxFILE_SEP_PATH) + name );
+                  cont = dir.GetNext(&name);
+               }
+            }
+            else
+               wxLogMessage(wxString("Can't enumerate directory ") + file);
+         }
+      }
       if (progress)
-         progress->Update(i, count);
+         progress->Update(i + bias, count);
    }
 }
 
@@ -372,30 +419,60 @@ DirManager::~DirManager()
    if (numDirManagers == 0) {
       CleanTempDir();
       //::wxRmdir(temp);
+   } else if( projFull.IsEmpty() && !mytemp.IsEmpty()) {
+      CleanDir(mytemp, wxEmptyString, ".DS_Store", _("Cleaning project temporary files"), kCleanTopDirToo | kCleanDirsOnlyIfEmpty );
    }
 }
 
 
 // static
+// This is quite a dangerous function.  In the temp dir it will delete every directory
+// recursively, that has 'project*' as the name - EVEN if it happens not to be an Audacity
+// project but just something else called project.
 void DirManager::CleanTempDir()
+{
+   // with default flags (none) this does not clean the top directory, and may remove non-empty 
+   // directories.
+   CleanDir(globaltemp, wxT("project*"), wxEmptyString, _("Cleaning up temporary files"));
+}
+
+// static
+void DirManager::CleanDir(
+   const wxString &path, 
+   const wxString &dirSpec, 
+   const wxString &fileSpec, 
+   const wxString &msg,
+   int flags)
 {
    if (dontDeleteTempFiles)
       return; // do nothing
 
-   wxArrayString filePathArray;
+   wxArrayString filePathArray, dirPathArray;
+
+   int countFiles =
+      RecursivelyEnumerate(path, filePathArray, dirSpec, fileSpec, true, false);
+   int countDirs =
+      RecursivelyEnumerate(path, dirPathArray, dirSpec, fileSpec, false, true);
 
    // Subtract 1 because we don't want to DELETE the global temp directory,
    // which this will find and list last.
-   int count =
-      RecursivelyEnumerate(globaltemp, filePathArray, wxT("project*"), true, true) - 1;
+   if ((flags & kCleanTopDirToo)==0) {
+      // Remove the globaltemp itself from the array so that it is not deleted.
+      --countDirs;
+      dirPathArray.resize(countDirs);
+   }
+
+   auto count = countFiles + countDirs;
    if (count == 0)
       return;
 
-   RecursivelyRemove(filePathArray, count, true, true, _("Cleaning up temporary files"));
+   RecursivelyRemove(filePathArray, count, 0, flags | kCleanFiles, msg);
+   RecursivelyRemove(dirPathArray, count, countFiles, flags | kCleanDirs, msg);
 }
 
 bool DirManager::SetProject(wxString& newProjPath, wxString& newProjName, const bool bCreate)
 {
+   bool copying = false;
    wxString oldPath = this->projPath;
    wxString oldName = this->projName;
    wxString oldFull = projFull;
@@ -456,8 +533,14 @@ bool DirManager::SetProject(wxString& newProjPath, wxString& newProjName, const 
       {
          BlockFilePtr b = iter->second.lock();
          if (b) {
+            // FIXME: TRAP_ERR
+            // JKC: The 'success' variable and recovery strategy looks 
+            // broken/bogus to me.  Would need to be using &= to catch 
+            // failure in one of the copies/moves.  Besides which,
+            // our temporary files are going to be deleted when we exit 
+            // anyway, if saving from temporary to named project.
             if (b->IsLocked())
-               success = CopyToNewProjectDirectory( &*b );
+               success = CopyToNewProjectDirectory( &*b ), copying = true;
             else{
                success = MoveToNewProjectDirectory( &*b );
             }
@@ -507,21 +590,32 @@ bool DirManager::SetProject(wxString& newProjPath, wxString& newProjName, const 
    // loading a project; in this latter case, the movement code does
    // nothing because SetProject is called before there are any
    // blockfiles.  Cleanup code trigger is the same
-   if (trueTotal > 0) {
-      // Clean up after ourselves; look for empty directories in the old
-      // and NEW project directories.  The easiest way to do this is to
-      // recurse depth-first and rmdir every directory seen in old and
-      // NEW; rmdir will fail on non-empty dirs.
 
-      wxArrayString dirlist;
-      const int count = RecursivelyEnumerate(cleanupLoc1, dirlist, wxEmptyString, false, true);
+   // Do the cleanup of the temporary directory only if not saving-as, which we
+   // detect by having done copies rather than moves.
+   if (!copying && trueTotal > 0) {
+      // Clean up after ourselves; boldly remove all files and directories
+      // in the tree.  (Unlike what the earlier version of this comment said.)
+      // Because this is a relocation of the project, not the case of closing
+      // a persistent project.
+
+      // You may think the loops above guarantee that all files we put in the
+      // folders have been moved away already, but:
+      // to fix bug1567 on Mac, we need to find the extraneous .DS_Store files
+      // that we didn't put there, but that Finder may insert into the folders,
+      // and mercilessly remove them, in addition to removing the directories.
+
+      CleanDir(
+         cleanupLoc1, 
+         wxEmptyString, // EmptyString => ALL directories.
+         // If the next line were wxEmptyString, ALL files would be removed.
+         ".DS_Store",   // Other project files should already have been removed.
+         _("Cleaning up cache directories"), 
+         kCleanTopDirToo);
 
       //This destroys the empty dirs of the OD block files, which are yet to come.
       //Dont know if this will make the project dirty, but I doubt it. (mchinen)
       //      count += RecursivelyEnumerate(cleanupLoc2, dirlist, wxEmptyString, false, true);
-
-      if (count > 0)
-         RecursivelyRemove(dirlist, count, false, true, _("Cleaning up cache directories"));
    }
    return true;
 }
@@ -1456,7 +1550,8 @@ int DirManager::ProjectFSCK(const bool bForceError, const bool bAutoRecoverMode)
    RecursivelyEnumerateWithProgress(
       dirPath,
       filePathArray,          // output: all files in project directory tree
-      wxEmptyString,
+      wxEmptyString,          // All dirs
+      wxEmptyString,          // All files
       true, false,
       mBlockFileHash.size(),  // rough guess of how many BlockFiles will be found/processed, for progress
       _("Inspecting project file data"));
@@ -1878,7 +1973,8 @@ void DirManager::RemoveOrphanBlockfiles()
    RecursivelyEnumerateWithProgress(
       dirPath,
       filePathArray,          // output: all files in project directory tree
-      wxEmptyString,
+      wxEmptyString,          // All dirs
+      wxEmptyString,          // All files
       true, false,
       mBlockFileHash.size(),  // rough guess of how many BlockFiles will be found/processed, for progress
       _("Inspecting project file data"));

@@ -190,8 +190,11 @@ bool AudioUnitEffectsModule::RegisterPlugin(PluginManagerInterface & pm, const w
    return true;
 }
 
-bool AudioUnitEffectsModule::IsPluginValid(const wxString & path)
+bool AudioUnitEffectsModule::IsPluginValid(
+   const wxString & path, bool bFast)
 {
+   if( bFast )
+      return true;
    wxString name;
    return FindAudioUnit(path, name) != NULL;
 }
@@ -242,7 +245,7 @@ void AudioUnitEffectsModule::LoadAudioUnitsOfType(OSType inAUType,
       result = AudioComponentGetDescription(component, &found);
       if (result == noErr)
       {
-         CFStringRef cfName;
+         CFStringRef cfName{};
          result = AudioComponentCopyName(component, &cfName);
          CFunique_ptr<const __CFString> uName{ cfName };
 
@@ -757,7 +760,7 @@ void AudioUnitEffectImportDialog::OnOk(wxCommandEvent & WXUNUSED(evt))
          continue;
       }
 
-      CFDataRef xml;
+      CFDataRef xml{};
       SInt32 error;
       Boolean res = CFURLCreateDataAndPropertiesFromResource(kCFAllocatorDefault,
                                                              url.get(),
@@ -1670,7 +1673,7 @@ bool AudioUnitEffect::LoadFactoryPreset(int id)
    OSStatus result;
 
    // Retrieve the list of factory presets
-   CFArrayRef array;
+   CFArrayRef array{};
    UInt32 dataSize = sizeof(CFArrayRef);
    result = AudioUnitGetProperty(mUnit,
                                  kAudioUnitProperty_FactoryPresets,
@@ -1721,7 +1724,7 @@ wxArrayString AudioUnitEffect::GetFactoryPresets()
    wxArrayString presets;
 
    // Retrieve the list of factory presets
-   CFArrayRef array;
+   CFArrayRef array{};
    UInt32 dataSize = sizeof(CFArrayRef);
    result = AudioUnitGetProperty(mUnit,
                                  kAudioUnitProperty_FactoryPresets,

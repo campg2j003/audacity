@@ -516,7 +516,8 @@ TrackPanel::TrackPanel(wxWindow * parent, wxWindowID id,
 
    mTimeCount = 0;
    mTimer.parent = this;
-   mTimer.Start(kTimerInterval, FALSE);
+   // Timer is started after the window is visible
+   GetProject()->Bind(wxEVT_IDLE, &TrackPanel::OnIdle, this);
 
    //Initialize a member variable pointing to the current
    //drawing track.
@@ -902,6 +903,24 @@ AudacityProject * TrackPanel::GetProject() const
    pWind = pWind->GetParent(); //Project
    wxASSERT( pWind );
    return (AudacityProject*)pWind;
+}
+
+void TrackPanel::OnIdle(wxIdleEvent& event)
+{
+   // The window must be ready when the timer fires (#1401)
+   if (IsShownOnScreen())
+   {
+      mTimer.Start(kTimerInterval, FALSE);
+
+      // Timer is started, we don't need the event anymore
+      GetProject()->Unbind(wxEVT_IDLE, &TrackPanel::OnIdle, this);
+   }
+   else
+   {
+      // Get another idle event, wx only guarantees we get one
+      // event after "some other normal events occur"
+      event.RequestMore();
+   }
 }
 
 /// AS: This gets called on our wx timer events.
@@ -7741,10 +7760,12 @@ void TrackPanel::OnTrackMenu(Track *t)
          (next && isMono && !next->GetLinked() &&
           next->GetKind() == Track::Wave);
 
-      theMenu->Enable(OnSwapChannelsID, t->GetLinked());
-      theMenu->Enable(OnMergeStereoID, canMakeStereo);
-      theMenu->Enable(OnSplitStereoID, t->GetLinked());
-      theMenu->Enable(OnSplitStereoMonoID, t->GetLinked());
+      // Unsafe to change channels during real-time preview (bug 1560)
+      bool unsafe = EffectManager::Get().RealtimeIsActive() && IsUnsafe();
+      theMenu->Enable(OnSwapChannelsID, t->GetLinked() && !unsafe);
+      theMenu->Enable(OnMergeStereoID, canMakeStereo && !unsafe);
+      theMenu->Enable(OnSplitStereoID, t->GetLinked() && !unsafe);
+      theMenu->Enable(OnSplitStereoMonoID, t->GetLinked() && !unsafe);
 
       // We only need to set check marks. Clearing checks causes problems on Linux (bug 851)
       // + Setting unchecked items to false is to get round a linux bug
@@ -7786,7 +7807,7 @@ void TrackPanel::OnTrackMenu(Track *t)
       SetMenuCheck(*mRateMenu, IdOfRate((int) track->GetRate()));
       SetMenuCheck(*mFormatMenu, IdOfFormat(track->GetSampleFormat()));
 
-      bool unsafe = IsUnsafe();
+      unsafe = IsUnsafe();
       for (int i = OnRate8ID; i <= OnFloatID; i++) {
          theMenu->Enable(i, !unsafe);
       }

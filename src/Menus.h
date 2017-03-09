@@ -38,7 +38,10 @@ void ModifyToolbarMenus();
 void ModifyAllProjectToolbarMenus();
 
 CommandFlag GetFocusedFrame();
-CommandFlag GetUpdateFlags();
+
+// If checkActive, do not do complete flags testing on an
+// inactive project as it is needlessly expensive.
+CommandFlag GetUpdateFlags(bool checkActive = false);
 
 double NearestZeroCrossing(double t0);
 
@@ -270,7 +273,7 @@ void OnNextLowerPeakFrequency();
 #endif
 void OnSelectCursorEnd();
 void OnSelectStartCursor();
-void OnSelectCursorSavedCursor();
+void OnSelectCursorStoredCursor();
 void OnSelectSyncLockSel();
 void OnSelectAllTracks();
 
@@ -347,12 +350,12 @@ void HandleMixAndRender(bool toNewTrack);
 
 private:
    SelectedRegion mRegionSave{};
-   bool mCursorPositionHasBeenSaved{false};
-   double mCursorPositionSaved;
+   bool mCursorPositionHasBeenStored{false};
+   double mCursorPositionStored;
 public:
 void OnSelectionSave();
 void OnSelectionRestore();
-void OnCursorPositionSave();
+void OnCursorPositionStore();
 
 void OnCursorTrackStart();
 void OnCursorTrackEnd();
@@ -414,6 +417,7 @@ void OnAbout();
 void OnQuickHelp();
 void OnManual();
 void OnCheckForUpdates();
+void MayCheckForUpdates();
 void OnShowLog();
 void OnHelpWelcome();
 void OnBenchmark();

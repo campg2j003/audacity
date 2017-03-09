@@ -8,7 +8,7 @@ bug reports and patches at:
 Personal support with Audacity is not provided by e-mail, but on our Forum:
   http://forum.audacityteam.org/ .
 
-Audacity is copyright (c) 1999-2015 by Audacity Team. This copyright notice
+Audacity is copyright (c) 1999-2017 by Audacity Team. This copyright notice
 applies to all documents in the Audacity source code archive, except as
 otherwise noted (mostly in the lib-src subdirectories).
 
@@ -19,12 +19,12 @@ http://creativecommons.org/licenses/by/3.0/legalcode .
 
 "Audacity" is a registered trademark of Dominic Mazzoni.
 
-Version 2.1.2 
+Version 2.1.3 
 
 Contents of this README:
 
 1.  Licensing
-2.  Changes since version 2.1.1 
+2.  Changes since version 2.1.2 
 3.  Known Issues at Release
 4.  Source Code, Libraries and Additional Copyright Information
 5.  Compilation Instructions
@@ -56,47 +56,46 @@ to http://www.gnu.org/licenses/old-licenses/gpl-2.0.html or write to
 
 -------------------------------------------------------------------------------
 
-2. Changes since version 2.1.1: 
+2. Changes since version 2.1.2: 
 
 Changes and Improvements:
    
  * Interface:  
-   * Spectrogram settings are now available per track.
-   * Clearer (sharper) display of pitch (EAC).
-   * New 'Spectral Reassignment' option in spectrogram.  Good for vocal work.
+   * (macOS) Support for horizontal scroll on Magic Mouse / Trackpad and for
+     Trackpad pinch/expand zoom gesture.
+   * Pinned option on waveform so waveform moves and recording/playing head
+     stays still.
+   * Timer Record options to save/export/exit after recording.
+   * Scrub Ruler and optional Scrub Toolbar.
+   * New shortcuts ALT+RIGHT and ALT+LEFT (move to labels without editing). 
+   
+ * Effects:
+   * Effects no longer grayed out when paused.
+   * New Distortion effect (replaces Leveller).
+   * SBSMS (higher quality but slower) option on Change Tempo / Change Pitch 
+     effects.
+   * New Rhythm Track generator (replaces Click Track). 
+   * New Generator for Sample Data Import.
+   * Nyquist effects now significantly faster.
    
  * Other Changes:   
-   * Upgraded the wxWidgets library from wx 2.8.12 to wx 3.0.2.  This is 
-     the main change in this release.
-   
+   * Upgraded the PortAudio library to v19 rev r1966.  This gives Audacity 
+     Windows 10 support.
+   * (macOS) Audacity.app now has its resources inside it rather than in a
+     separate folder, so installation to /Applications/ is cleaner.
+   * (macOS) Audacity 2.1.3 provides partial support for Sierra. Details at 
+     http://wiki.audacityteam.org/wiki/Partial_Support_for_Mac_Sierra_in_2.1.3
+
 Bug fixes:
 
- * Crashes
-   * Crash using 'space' in Selection toolbar context menu fixed.
-   * Crash setting equalization effect parameters in chains fixed.
-   * Crash when pressing both mouse buttons over toolbar buttons fixed.
-   * (Rare) crash or freeze in sound activated recording fixed.
-   * (Rare) crash on using plot spectrum for first time fixed.
-
- * Interface
-   * Equalization effect settings are now saved.
-   * Oversized Export Options window (FFmpeg) now OK on smaller screens
-   * FLAC import/export fast again.
-   * Can now set undefined frequency in Spectral Selection bar.
-   * Imported presets on custom FFmpeg export fixed.
-   * Text input boxes working with VAMP
-   * Keyboard playback commands now work again.
-   * Import Raw Data now works when in Polish language.
-   
- * Mac OS X
-   * Mouse preference bindings now show 'command', not 'ctrl'
-   
+ Over 60 bugs fixed, including five longstanding bugs.
+ 
 -------------------------------------------------------------------------------
 
-3. Known Issues in 2.1.2:
+3. Known Issues in 2.1.3:
 
-For known issues at release of 2.1.2 please see:
-  http://wiki.audacityteam.org/wiki/Release_Notes_2.1.2#known
+For known issues at release of 2.1.3 please see:
+  http://wiki.audacityteam.org/wiki/Release_Notes_2.1.3#known
 
 Please also check:
   http://wiki.audacityteam.org/index.php?title=Known_Issues
@@ -255,7 +254,7 @@ ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 
 5. Compilation instructions
 
-First you must download wxWidgets. Audacity 2.1.2 requires wxWidgets 3.0.x, 
+First you must download wxWidgets. Audacity 2.1.3 requires wxWidgets 3.0.x, 
 preferably 3.0.2, which can be obtained from:
 
    http://www.wxWidgets.org/ .
@@ -273,10 +272,10 @@ Installation of other libraries is optional, see:
 If you install libraries using a package management system like Apt or RPM,
 you need to install the "dev" (development) packages for each library.
 
-To compile on Linux, Mac OS X and other Unix systems, execute these 
+To compile on Linux and other Unix systems and using gnu tools, execute these 
 commands:
 
-  ./configure
+  ./configure CXXFLAGS="-std=gnu++11"
   make
   make install  # as root
 
@@ -292,7 +291,7 @@ and header dependencies:
 To compile on Windows using MSVC++, please follow the instructions in
 win\compile.txt in the source code. 
 
-To compile using Xcode on Mac OS X, see the instructions in mac/compile.txt.
+To compile using Xcode on Mac OS X, see the instructions in mac/Build.txt.
 
 For more information on compilation, please visit:
 
@@ -305,6 +304,39 @@ or ask at:
 --------------------------------------------------------------------------------
 
 6.  Previous Changes going back to version 1.1.0
+
+Changes in version 2.1.2
+   
+ * Interface:  
+   * Spectrogram settings are now available per track.
+   * Clearer (sharper) display of pitch (EAC).
+   * New 'Spectral Reassignment' option in spectrogram.  Good for vocal work.
+   
+ * Other Changes:   
+   * Upgraded the wxWidgets library from wx 2.8.12 to wx 3.0.2.  This is 
+     the main change in this release.
+   
+Bug fixes:
+
+ * Crashes
+   * Crash using 'space' in Selection toolbar context menu fixed.
+   * Crash setting equalization effect parameters in chains fixed.
+   * Crash when pressing both mouse buttons over toolbar buttons fixed.
+   * (Rare) crash or freeze in sound activated recording fixed.
+   * (Rare) crash on using plot spectrum for first time fixed.
+
+ * Interface
+   * Equalization effect settings are now saved.
+   * Oversized Export Options window (FFmpeg) now OK on smaller screens
+   * FLAC import/export fast again.
+   * Can now set undefined frequency in Spectral Selection bar.
+   * Imported presets on custom FFmpeg export fixed.
+   * Text input boxes working with VAMP
+   * Keyboard playback commands now work again.
+   * Import Raw Data now works when in Polish language.
+   
+ * Mac OS X
+   * Mouse preference bindings now show 'command', not 'ctrl'
 
 Changes in version 2.1.1: 
 

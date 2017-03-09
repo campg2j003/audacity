@@ -45,24 +45,69 @@ hold information about one contributor to Audacity.
 #include "AllThemeResources.h"
 
 #include "../images/AudacityLogoWithName.xpm"
+#include "RevisionIdent.h"
+
+// RevisionIdent.h may contain #defines like these ones:
+//#define REV_LONG "28864acb238cb3ca71dda190a2d93242591dd80e"
+//#define REV_TIME "Sun Apr 12 12:40:22 2015 +0100"
+
+
+#ifndef REV_TIME
+#define REV_TIME "unknown date and time"
+#endif
+
+#ifdef REV_LONG
+#define REV_IDENT wxString( "[[http://github.com/audacity/audacity/commit/" )+ REV_LONG + "|" + wxString( REV_LONG ).Left(6) + "]] of " +  REV_TIME 
+#else
+#define REV_IDENT wxT("No revision identifier was provided")
+#endif
 
 extern wxString FormatHtmlText( const wxString & Text );
+
+// Function to give the xtra arguments to put on the version check string.
+const wxString VerCheckArgs(){
+   wxString result = wxString("from_ver=") + AUDACITY_VERSION_STRING;
+#ifdef REV_LONG
+   result += wxString("&CommitId=")+wxString(REV_LONG).Left(6);
+#endif
+   result += wxString("&Time=") + wxString( __DATE__ ) + wxString( __TIME__ );
+   result.Replace(" ","");
+   return result;
+}
+
+// Url with Version check args attached.
+const wxString VerCheckUrl(){
+   //The version we intend to use for live Audacity.
+#define VER_CHECK_URL "http://www.audacityteam.org/download/?"
+//For testing of our scriptlet.
+//#define VER_CHECK_URL "http://www.audacityteam.org/slug/?"
+//For testing locally
+//#define VER_CHECK_URL "http://localhost:63342/WorkingDocs/demos/download.html?"
+
+   return wxString( wxT(VER_CHECK_URL)) +VerCheckArgs();
+}
+
+// Text of htperlink to check versions.
+const wxString VerCheckHtml(){
+
+   wxString result = "<center>[[";
+   result += VerCheckUrl() + "|" + _("Check Online");
+   result += "]]</center>\n";
+   return result;
+}
+
 
 void AboutDialog::CreateCreditsList()
 {
    // The Audacity Team: developers and support
    AddCredit(wxString(wxT("Gale Andrews, ")) + _("quality assurance"), roleTeamMember);
-   AddCredit(wxString(wxT("Richard Ash, ")) + _("developer"), roleTeamMember);
-   AddCredit(wxString(wxT("Christian Brochec, ")) + _("documentation and support, French"), roleTeamMember);
    AddCredit(wxString(wxT("Arturo \"Buanzo\" Busleiman, ")) + _("system administration"), roleTeamMember);
    AddCredit(wxString(wxT("James Crook, ")) + _("developer"), roleTeamMember);
    AddCredit(wxString(wxT("Roger Dannenberg, ")) + _("co-founder and developer"), roleTeamMember);
    AddCredit(wxString(wxT("Steve Daulton")), roleTeamMember);
-   AddCredit(wxString(wxT("Benjamin Drung, ")) + _("developer"), roleTeamMember);
    AddCredit(wxString(wxT("Vaughan Johnson, ")) + _("developer"), roleTeamMember);
    AddCredit(wxString(wxT("Greg Kozikowski, ")) + _("documentation and support"), roleTeamMember);
    AddCredit(wxString(wxT("Paul Licameli, ")) + _("developer"), roleTeamMember);
-   AddCredit(wxString(wxT("Leland Lucius, ")) + _("developer"), roleTeamMember);
    AddCredit(wxString(wxT("Peter Sampson")), roleTeamMember);
    AddCredit(wxString(wxT("Martyn Shaw, ")) + _("developer"), roleTeamMember);
    AddCredit(wxString(wxT("Bill Wharrie, ")) + _("documentation and support"), roleTeamMember);
@@ -70,11 +115,15 @@ void AboutDialog::CreateCreditsList()
    // Emeritus: people who were "lead developers" or made an
    // otherwise distinguished contribution, but who are no
    // longer active.
+   AddCredit(wxString(wxT("Richard Ash, ")) + _("developer"), roleEmeritusTeam); 
+   AddCredit(wxString(wxT("Christian Brochec, ")) + _("documentation and support, French"), roleEmeritusTeam);
    AddCredit(wxString(wxT("Matt Brubeck, ")) + _("developer"), roleEmeritusTeam);
    AddCredit(wxString(wxT("Michael Chinen, ")) + _("developer"), roleEmeritusTeam);
    AddCredit(wxString(wxT("Al Dimond, ")) + _("developer"), roleEmeritusTeam);
+   AddCredit(wxString(wxT("Benjamin Drung, ")) + _("developer"), roleEmeritusTeam);
    AddCredit(wxString(wxT("Joshua Haberman, ")) + _("developer"), roleEmeritusTeam);
    AddCredit(wxString(wxT("Ruslan Ijbulatov, ")) + _("developer"), roleEmeritusTeam);
+   AddCredit(wxString(wxT("Leland Lucius, ")) + _("developer"), roleEmeritusTeam);
    AddCredit(wxString(wxT("Dominic Mazzoni, "))+_("co-founder and developer"), roleEmeritusTeam);
    AddCredit(wxString(wxT("Markus Meyer, ")) + _("developer"), roleEmeritusTeam);
    AddCredit(wxString(wxT("Monty Montgomery, ")) + _("developer"), roleEmeritusTeam);
@@ -126,8 +175,14 @@ void AboutDialog::CreateCreditsList()
    AddCredit(wxString(wxT("Mark Young, ")) + _("developer"), roleContributor);
    AddCredit(wxString(wxT("Wing Yu, ")) + _("developer"), roleContributor);
 
+#if 1
    // Translators
-
+   // This list is not current, so should it be commented out?
+   // Also translators get a translation credit in Audacity about box by a special
+   // mechanism that shows it when their translation is being used - unlike
+   // on the website credits.
+   // Translators who are currently helping have queried our showing this inaccurate list,
+   // and in all languages.
    AddCredit(wxT("Mikhail Balabanov (bg)"), roleTranslators);
    AddCredit(wxT("Francesc Busquets (ca)"), roleTranslators);
    AddCredit(wxT("Pau Crespo (ca)"), roleTranslators);
@@ -172,7 +227,7 @@ void AboutDialog::CreateCreditsList()
    AddCredit(wxT("XiaoXi Liu (zh_CN)"), roleTranslators);
    AddCredit(wxT("Chido (zh_TW)"), roleTranslators);
    AddCredit(wxT("Panming Zhong (zh_TW)"), roleTranslators);
-
+#endif
    // Libraries
 
    AddCredit(wxT("[[http://www.jclark.com/xml/expat.html|expat]]"), roleLibrary);
@@ -329,7 +384,7 @@ visit our [[http://forum.audacityteam.org/|forum]].");
       GetCreditsByRole(roleThanks) +
 
       wxT("<p><br>") + _("<b>Audacity<sup>&reg;</sup></b> software is copyright")+
-      wxT("&copy; 1999-2016 Audacity Team.<br>") +
+      wxT("&copy; 1999-2017 Audacity Team.<br>") +
       _("The name <b>Audacity<sup>&reg;</sup></b> is a registered trademark of Dominic Mazzoni.") +
       wxT("<p><br>")+_("Audacity website: [[http://www.audacityteam.org/|http://www.audacityteam.org/]]") +
       wxT("</center>"));
@@ -403,6 +458,7 @@ void AboutDialog::PopulateInformationPage( ShuttleGui & S )
    informationStr = wxT("<h2><center>");
    informationStr += _("Build Information");
    informationStr += wxT("</center></h2>\n");
+   informationStr += VerCheckHtml();
    // top level heading
    informationStr += wxT("<h3>");
    informationStr += _("File Format Support");
@@ -577,15 +633,7 @@ void AboutDialog::PopulateInformationPage( ShuttleGui & S )
 
    // Current date
    AddBuildinfoRow(&informationStr, _("Program build date: "), __TDATE__);
-
-// Uncomment the next two lines to test hyperlinks work from here.
-//   AddBuildinfoRow(&informationStr, wxT("Link Test:"), 
-//      wxT("[[https:www.audacityteam.org|Click bait]]") );
-
-   AddBuildinfoRow(&informationStr, _("Commit Id:"),
-#include "RevisionIdent.h"
-);
-
+   AddBuildinfoRow(&informationStr, _("Commit Id:"), REV_IDENT );
 #ifdef __WXDEBUG__
    AddBuildinfoRow(&informationStr, _("Build type:"), _("Debug build"));
 #else

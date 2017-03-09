@@ -444,8 +444,8 @@ void AudacityProject::CreateMenusAndCommands()
          AudioIONotBusyFlag | CutCopyAvailableFlag);
       /* i18n-hint: (verb)*/
       c->AddItem(wxT("Paste"), _("&Paste"), FN(OnPaste), wxT("Ctrl+V"),
-         AudioIONotBusyFlag | ClipboardFlag,
-         AudioIONotBusyFlag | ClipboardFlag);
+         AudioIONotBusyFlag,
+         AudioIONotBusyFlag);
       /* i18n-hint: (verb)*/
       c->AddItem(wxT("Duplicate"), _("Duplic&ate"), FN(OnDuplicate), wxT("Ctrl+D"));
 
@@ -558,7 +558,7 @@ void AudacityProject::CreateMenusAndCommands()
 
       c->AddItem(wxT("SelStartCursor"), _("Track &Start to Cursor"), FN(OnSelectStartCursor), wxT("Shift+J"));
       c->AddItem(wxT("SelCursorEnd"), _("Cursor to Track &End"), FN(OnSelectCursorEnd), wxT("Shift+K"));
-      c->AddItem(wxT("SelCursorSavedCursor"), _("Cursor to Saved &Cursor Position"), FN(OnSelectCursorSavedCursor),
+      c->AddItem(wxT("SelCursorStoredCursor"), _("Cursor to Stored &Cursor Position"), FN(OnSelectCursorStoredCursor),
          wxT(""), TracksExistFlag, TracksExistFlag);
 
 
@@ -597,13 +597,13 @@ void AudacityProject::CreateMenusAndCommands()
 
       c->AddSeparator();
 
-      c->AddItem(wxT("SelSave"), _("Re&gion Save"), FN(OnSelectionSave),
+      c->AddItem(wxT("SelSave"), _("Store Re&gion"), FN(OnSelectionSave),
          WaveTracksSelectedFlag,
          WaveTracksSelectedFlag);
-      c->AddItem(wxT("SelRestore"), _("Regio&n Restore"), FN(OnSelectionRestore),
+      c->AddItem(wxT("SelRestore"), _("Retrieve Regio&n"), FN(OnSelectionRestore),
          TracksExistFlag,
          TracksExistFlag);
-      c->AddItem(wxT("SaveCursorPosition"), _("Save Cursor Pos&ition"), FN(OnCursorPositionSave),
+      c->AddItem(wxT("StoreCursorPosition"), _("Store Cursor Pos&ition"), FN(OnCursorPositionStore),
          WaveTracksExistFlag,
          WaveTracksExistFlag);
 
@@ -759,7 +759,7 @@ void AudacityProject::CreateMenusAndCommands()
 
       /* i18n-hint: (verb) Start or Stop audio playback*/
       c->AddItem(wxT("PlayStop"), _("Pl&ay/Stop"), FN(OnPlayStop), wxT("Space"));
-      c->AddItem(wxT("PlayStopSelect"), _("Play/Stop and &Set Cursor"), FN(OnPlayStopSelect), wxT("Shift+A"));
+      c->AddItem(wxT("PlayStopSelect"), _("Play/Stop and &Set Cursor"), FN(OnPlayStopSelect), wxT("X"));
       c->AddItem(wxT("PlayLooped"), _("&Loop Play"), FN(OnPlayLooped), wxT("Shift+Space"),
          WaveTracksExistFlag | AudioIONotBusyFlag | CanStopAudioStreamFlag,
          WaveTracksExistFlag | AudioIONotBusyFlag | CanStopAudioStreamFlag);
@@ -909,15 +909,15 @@ void AudacityProject::CreateMenusAndCommands()
       c->AddSeparator();
 
 #ifdef EXPERIMENTAL_SYNC_LOCK
-      c->AddCheck(wxT("SyncLock"), _("Sync-&Lock Tracks"), FN(OnSyncLock), 0,
+      c->AddCheck(wxT("SyncLock"), _("Sync-&Lock Tracks (on/off)"), FN(OnSyncLock), 0,
          AlwaysEnabledFlag, AlwaysEnabledFlag);
 
       c->AddSeparator();
 #endif
 
-      c->AddItem(wxT("AddLabel"), _("Add Label At &Selection"), FN(OnAddLabel), wxT("Ctrl+B"),
+      c->AddItem(wxT("AddLabel"), _("Add Label at &Selection"), FN(OnAddLabel), wxT("Ctrl+B"),
          AlwaysEnabledFlag, AlwaysEnabledFlag);
-      c->AddItem(wxT("AddLabelPlaying"), _("Add Label At &Playback Position"),
+      c->AddItem(wxT("AddLabelPlaying"), _("Add Label at &Playback Position"),
          FN(OnAddLabelPlaying),
 #ifdef __WXMAC__
          wxT("Ctrl+."),
@@ -1695,13 +1695,30 @@ CommandFlag AudacityProject::GetFocusedFrame()
    return AlwaysEnabledFlag;
 }
 
-CommandFlag AudacityProject::GetUpdateFlags()
+CommandFlag AudacityProject::GetUpdateFlags(bool checkActive)
 {
    // This method determines all of the flags that determine whether
    // certain menu items and commands should be enabled or disabled,
    // and returns them in a bitfield.  Note that if none of the flags
    // have changed, it's not necessary to even check for updates.
    auto flags = AlwaysEnabledFlag;
+   // static variable, used to remember flags for next time.
+   static auto lastFlags = flags;
+
+   if (auto focus = wxWindow::FindFocus()) {
+      while (focus && focus->GetParent())
+         focus = focus->GetParent();
+      if (focus && !static_cast<wxTopLevelWindow*>(focus)->IsIconized())
+         flags |= NotMinimizedFlag;
+   }
+
+   // quick 'short-circuit' return.
+   if ( checkActive && !IsActive() ){
+      // short cirucit return should preserve flags that have not been calculated.
+      flags = (lastFlags & ~NotMinimizedFlag) | flags;
+      lastFlags = flags;
+      return flags;
+   }
 
    if (!gAudioIO->IsAudioTokenActive(GetAudioIOToken()))
       flags |= AudioIONotBusyFlag;
@@ -1791,8 +1808,11 @@ CommandFlag AudacityProject::GetUpdateFlags()
    if (ZoomOutAvailable() && (flags & TracksExistFlag))
       flags |= ZoomOutAvailableFlag;
 
-   if ((flags & LabelTracksExistFlag) && LabelTrack::IsTextClipSupported())
-      flags |= TextClipFlag;
+   // TextClipFlag is currently unused (Jan 2017, 2.1.3 alpha)
+   // and LabelTrack::IsTextClipSupported() is quite slow on Linux,
+   // so disable for now (See bug 1575).
+   // if ((flags & LabelTracksExistFlag) && LabelTrack::IsTextClipSupported())
+   //    flags |= TextClipFlag;
 
    flags |= GetFocusedFrame();
 
@@ -1829,13 +1849,7 @@ CommandFlag AudacityProject::GetUpdateFlags()
    if (bar->ControlToolBar::CanStopAudioStream())
       flags |= CanStopAudioStreamFlag;
 
-   if (auto focus = wxWindow::FindFocus()) {
-      while (focus && focus->GetParent())
-         focus = focus->GetParent();
-      if (focus && !static_cast<wxTopLevelWindow*>(focus)->IsIconized())
-         flags |= NotMinimizedFlag;
-   }
-
+   lastFlags = flags;
    return flags;
 }
 
@@ -1928,7 +1942,7 @@ void AudacityProject::ModifyToolbarMenus()
 
 // checkActive is a temporary hack that should be removed as soon as we
 // get multiple effect preview working
-void AudacityProject::UpdateMenus(bool /*checkActive*/)
+void AudacityProject::UpdateMenus(bool checkActive)
 {
    //ANSWER-ME: Why UpdateMenus only does active project?
    //JKC: Is this test fixing a bug when multiple projects are open?
@@ -1936,10 +1950,7 @@ void AudacityProject::UpdateMenus(bool /*checkActive*/)
    if (this != GetActiveProject())
       return;
 
-   //if (checkActive && !IsActive())
-     // return;
-
-   auto flags = GetUpdateFlags();
+   auto flags = GetUpdateFlags(checkActive);
    auto flags2 = flags;
 
    // We can enable some extra items if we have select-all-on-none.
@@ -2726,6 +2737,7 @@ void AudacityProject::OnMoveToLabel(bool next)
          }
          else {
             GetViewInfo().selectedRegion = label->selectedRegion;
+            mTrackPanel->ScrollIntoView(GetViewInfo().selectedRegion.t0());
             RedrawProject();
          }
 
@@ -5185,12 +5197,12 @@ void AudacityProject::OnSelectStartCursor()
    mTrackPanel->Refresh(false);
 }
 
-void AudacityProject::OnSelectCursorSavedCursor()
+void AudacityProject::OnSelectCursorStoredCursor()
 {
-   if (mCursorPositionHasBeenSaved) {
+   if (mCursorPositionHasBeenStored) {
       double cursorPositionCurrent = IsAudioActive() ? gAudioIO->GetStreamTime() : mViewInfo.selectedRegion.t0();
-      mViewInfo.selectedRegion.setTimes(std::min(cursorPositionCurrent, mCursorPositionSaved),
-         std::max(cursorPositionCurrent, mCursorPositionSaved));
+      mViewInfo.selectedRegion.setTimes(std::min(cursorPositionCurrent, mCursorPositionStored),
+         std::max(cursorPositionCurrent, mCursorPositionStored));
 
       ModifyState(false);
       mTrackPanel->Refresh(false);
@@ -5913,10 +5925,10 @@ void AudacityProject::OnSelectionSave()
    mRegionSave =  mViewInfo.selectedRegion;
 }
 
-void AudacityProject::OnCursorPositionSave()
+void AudacityProject::OnCursorPositionStore()
 {
-   mCursorPositionSaved = IsAudioActive() ? gAudioIO->GetStreamTime() : mViewInfo.selectedRegion.t0();
-   mCursorPositionHasBeenSaved = true;
+   mCursorPositionStored = IsAudioActive() ? gAudioIO->GetStreamTime() : mViewInfo.selectedRegion.t0();
+   mCursorPositionHasBeenStored = true;
 }
 
 void AudacityProject::OnSelectionRestore()
@@ -6570,11 +6582,8 @@ void AudacityProject::OnTimerRecord()
       switch (iTimerRecordingOutcome) {
       case POST_TIMER_RECORD_CANCEL_WAIT:
          // Canceled on the wait dialog
-         if (GetUndoManager()->UndoAvailable()) {
-            // MY: We need to roll back what changes we have made here
-            OnUndo();
-         }
-      break;
+         RollbackState();
+         break;
       case POST_TIMER_RECORD_CANCEL:
          // RunWaitDialog() shows the "wait for start" as well as "recording" dialog
          // if it returned POST_TIMER_RECORD_CANCEL it means the user cancelled while the recording, so throw out the fresh track.
@@ -6582,26 +6591,26 @@ void AudacityProject::OnTimerRecord()
          // which is blocked by this function.
          // so instead we mark a flag to undo it there.
          mTimerRecordCanceled = true;
-      break;
+         break;
       case POST_TIMER_RECORD_NOTHING:
          // No action required
-      break;
+         break;
       case POST_TIMER_RECORD_CLOSE:
          // Quit Audacity
          exit(0);
-      break;
+         break;
       case POST_TIMER_RECORD_RESTART:
          // Restart System
 #ifdef __WINDOWS__
          system("shutdown /r /f /t 30");
 #endif
-      break;
+         break;
       case POST_TIMER_RECORD_SHUTDOWN:
          // Shutdown System
 #ifdef __WINDOWS__
          system("shutdown /s /f /t 30");
 #endif
-      break;
+         break;
       }
    }
 }
@@ -6839,7 +6848,15 @@ void AudacityProject::OnManual()
 
 void AudacityProject::OnCheckForUpdates()
 {
-   ::OpenInDefaultBrowser( wxString( wxT("http://audacityteam.org/download/?from_ver=")) + AUDACITY_VERSION_STRING );
+   ::OpenInDefaultBrowser( VerCheckUrl());
+}
+
+// Only does the update checks if it's an ALPHA build and not disabled by preferences.
+void AudacityProject::MayCheckForUpdates()
+{
+#if IS_ALPHA
+   OnCheckForUpdates();
+#endif
 }
 
 void AudacityProject::OnShowLog()
