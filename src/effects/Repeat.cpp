@@ -67,6 +67,11 @@ wxString EffectRepeat::GetDescription()
    return XO("Repeats the selection the specified number of times");
 }
 
+wxString EffectRepeat::ManualPage()
+{
+   return wxT("Repeat");
+}
+
 // EffectIdentInterface implementation
 
 EffectType EffectRepeat::GetType()
@@ -139,12 +144,12 @@ bool EffectRepeat::Process()
          auto dest = track->Copy(mT0, mT1);
          for(int j=0; j<repeatCount; j++)
          {
-            if (!track->Paste(tc, dest.get()) ||
-                  TrackProgress(nTrack, j / repeatCount)) // TrackProgress returns true on Cancel.
+            if (TrackProgress(nTrack, j / repeatCount)) // TrackProgress returns true on Cancel.
             {
                bGoodResult = false;
                break;
             }
+            track->Paste(tc, dest.get());
             tc += tLen;
          }
          if (tc > maxDestLen)

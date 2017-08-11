@@ -33,6 +33,7 @@
 #include <wx/msgdlg.h>
 #include <wx/settings.h>
 
+#include "AudacityException.h"
 #include "ShuttleGui.h"
 #include "Prefs.h"
 #include "Project.h"
@@ -49,6 +50,7 @@
 #include "AllThemeResources.h"
 
 #include "FileDialog.h"
+#include "FileNames.h"
 #include "import/Import.h"
 
 #define ChainsListID       7001
@@ -192,7 +194,8 @@ void BatchProcessDialog::OnApplyToProject(wxCommandEvent & WXUNUSED(event))
    bool success;
    {
       wxWindowDisabler wd(pD);
-      success = mBatchCommands.ApplyChain();
+      success = GuardedCall< bool >(
+         [this]{ return mBatchCommands.ApplyChain(); } );
    }
 
    if (!success) {
@@ -235,7 +238,6 @@ void BatchProcessDialog::OnApplyToFiles(wxCommandEvent & WXUNUSED(event))
       return;
    }
 
-   wxString path = gPrefs->Read(wxT("/DefaultOpenPath"), ::wxGetCwd());
    wxString prompt =  _("Select file(s) for batch processing...");
 
    FormatList l;
@@ -277,6 +279,7 @@ void BatchProcessDialog::OnApplyToFiles(wxCommandEvent & WXUNUSED(event))
       }
    }
 
+   auto path = FileNames::FindDefaultPath(FileNames::Operation::Open);
    FileDialog dlog(this,
                    prompt,
                    path,
@@ -288,7 +291,7 @@ void BatchProcessDialog::OnApplyToFiles(wxCommandEvent & WXUNUSED(event))
    if (dlog.ShowModal() != wxID_OK) {
       return;
    }
-
+   
    wxArrayString files;
    dlog.GetPaths(files);
 
@@ -356,15 +359,21 @@ void BatchProcessDialog::OnApplyToFiles(wxCommandEvent & WXUNUSED(event))
       mList->SetItemImage(i, 1, 1);
       mList->EnsureVisible(i);
 
-      project->Import(files[i]);
-      project->OnSelectAll();
-      if (!mBatchCommands.ApplyChain()) {
-         break;
-      }
+      auto success = GuardedCall< bool >( [&] {
+         project->Import(files[i]);
+         project->OnSelectAll();
+         if (!mBatchCommands.ApplyChain())
+            return false;
 
-      if (!pD->IsShown() || mAbort) {
+         if (!pD->IsShown() || mAbort)
+            return false;
+
+         return true;
+      } );
+
+      if (!success)
          break;
-      }
+      
       UndoManager *um = project->GetUndoManager();
       um->ClearStates();
       project->OnSelectAll();
@@ -529,7 +538,8 @@ void EditChainsDialog::PopulateOrExchange(ShuttleGui & S)
          S.SetStyle(wxSUNKEN_BORDER | wxLC_REPORT | wxLC_HRULES | wxLC_SINGLE_SEL |
                     wxLC_EDIT_LABELS);
          mChains = S.Id(ChainsListID).AddListControlReportMode();
-         mChains->InsertColumn(0, wxT("Chain"), wxLIST_FORMAT_LEFT);
+         // i18n-hint: This is the heading for a column in the edit chains dialog
+         mChains->InsertColumn(0, _("Chain"), wxLIST_FORMAT_LEFT);
          S.StartHorizontalLay(wxCENTER, false);
          {
             S.Id(AddButtonID).AddButton(_("&Add"));

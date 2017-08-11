@@ -26,7 +26,8 @@ class WarningsPrefs final : public PrefsPanel
  public:
    WarningsPrefs(wxWindow * parent);
    ~WarningsPrefs();
-   bool Apply() override;
+   bool Commit() override;
+   wxString HelpPageName() override;
 
  private:
    void Populate();

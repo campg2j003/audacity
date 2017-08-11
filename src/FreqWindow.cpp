@@ -76,7 +76,7 @@ and in the spectrogram spectral selection.
 #include "Theme.h"
 #include "AllThemeResources.h"
 
-#include "FileDialog.h"
+#include "FileNames.h"
 
 #include "WaveTrack.h"
 
@@ -189,7 +189,6 @@ FreqWindow::FreqWindow(wxWindow * parent, wxWindowID id,
                            const wxPoint & pos)
 :  wxDialogWrapper(parent, id, title, pos, wxDefaultSize,
             wxDEFAULT_DIALOG_STYLE | wxRESIZE_BORDER | wxMAXIMIZE_BOX),
-   mData(NULL),
    mAnalyst(std::make_unique<SpectrumAnalyst>())
 {
    SetName(GetTitle());
@@ -286,6 +285,7 @@ FreqWindow::FreqWindow(wxWindow * parent, wxWindowID id,
          int w;
          vRuler->ruler.GetMaxSize(&w, NULL);
          vRuler->SetMinSize(wxSize(w, 150));  // height needed for wxGTK
+         vRuler->SetTickColour( theTheme.Colour( clrGraphLabels ));
 
          S.AddSpace(wxDefaultCoord, 1);
          S.Prop(1);
@@ -355,6 +355,7 @@ FreqWindow::FreqWindow(wxWindow * parent, wxWindowID id,
          int h;
          hRuler->ruler.GetMaxSize(NULL, &h);
          hRuler->SetMinSize(wxSize(wxDefaultCoord, h));
+         hRuler->SetTickColour( theTheme.Colour( clrGraphLabels ));
 
          S.AddSpace(1, wxDefaultCoord);
          S.Prop(1);
@@ -492,6 +493,9 @@ FreqWindow::FreqWindow(wxWindow * parent, wxWindowID id,
 
    Layout();
    Fit();
+   // Bug 1607:
+   Center();
+
    SetMinSize(GetSize());
    mAlgChoice->SetFocus();
 
@@ -514,8 +518,6 @@ FreqWindow::FreqWindow(wxWindow * parent, wxWindowID id,
 
 FreqWindow::~FreqWindow()
 {
-   if (mData)
-      delete[] mData;
 }
 
 bool FreqWindow::Show(bool show)
@@ -546,10 +548,7 @@ bool FreqWindow::Show(bool show)
 
 void FreqWindow::GetAudio()
 {
-   if (mData) {
-      delete [] mData;
-      mData = NULL;
-   }
+   mData.reset();
    mDataLen = 0;
 
    int selcount = 0;
@@ -571,23 +570,25 @@ void FreqWindow::GetAudio()
             else
                // dataLen is not more than 10 * 2 ^ 20
                mDataLen = dataLen.as_size_t();
-            mData = new float[mDataLen];
-            track->Get((samplePtr)mData, floatSample, start, mDataLen);
+            mData = Floats{ mDataLen };
+            // Don't allow throw for bad reads
+            track->Get((samplePtr)mData.get(), floatSample, start, mDataLen,
+                       fillZero, false);
          }
          else {
             if (track->GetRate() != mRate) {
                wxMessageBox(_("To plot the spectrum, all selected tracks must be the same sample rate."));
-               delete[] mData;
-               mData = NULL;
+               mData.reset();
                mDataLen = 0;
                return;
             }
             auto start = track->TimeToLongSamples(p->mViewInfo.selectedRegion.t0());
-            float *buffer2 = new float[mDataLen];
-            track->Get((samplePtr)buffer2, floatSample, start, mDataLen);
+            Floats buffer2{ mDataLen };
+            // Again, stop exceptions
+            track->Get((samplePtr)buffer2.get(), floatSample, start, mDataLen,
+                       fillZero, false);
             for (size_t i = 0; i < mDataLen; i++)
                mData[i] += buffer2[i];
-            delete[] buffer2;
          }
          selcount++;
       }
@@ -1000,7 +1001,7 @@ void FreqWindow::Recalc()
       wxYieldIfNeeded();
 
       mAnalyst->Calculate(alg, windowFunc, mWindowSize, mRate,
-         mData, mDataLen,
+         mData.get(), mDataLen,
          &mYMin, &mYMax, mProgress);
    }
    if (hadFocus) {
@@ -1026,7 +1027,8 @@ void FreqWindow::OnExport(wxCommandEvent & WXUNUSED(event))
 {
    wxString fName = _("spectrum.txt");
 
-   fName = FileSelector(_("Export Spectral Data As:"),
+   fName = FileNames::SelectFile(FileNames::Operation::Export,
+      _("Export Spectral Data As:"),
       wxEmptyString, fName, wxT("txt"), wxT("*.txt"), wxFD_SAVE | wxRESIZE_BORDER, this);
 
    if (fName == wxT(""))
@@ -1202,22 +1204,22 @@ bool SpectrumAnalyst::Calculate(Algorithm alg, int windowFunc,
    auto half = mWindowSize / 2;
    mProcessed.resize(mWindowSize);
 
-   float *in = new float[mWindowSize];
-   float *out = new float[mWindowSize];
-   float *out2 = new float[mWindowSize];
-   float *win = new float[mWindowSize];
+   Floats in{ mWindowSize };
+   Floats out{ mWindowSize };
+   Floats out2{ mWindowSize };
+   Floats win{ mWindowSize };
 
    for (size_t i = 0; i < mWindowSize; i++) {
       mProcessed[i] = 0.0f;
       win[i] = 1.0f;
    }
 
-   WindowFunc(windowFunc, mWindowSize, win);
+   WindowFunc(windowFunc, mWindowSize, win.get());
 
    // Scale window such that an amplitude of 1.0 in the time domain
    // shows an amplitude of 0dB in the frequency domain
    double wss = 0;
-   for(size_t i = 0; i < mWindowSize; i++)
+   for (size_t i = 0; i<mWindowSize; i++)
       wss += win[i];
    if(wss > 0)
       wss = 4.0 / (wss*wss);
@@ -1236,7 +1238,7 @@ bool SpectrumAnalyst::Calculate(Algorithm alg, int windowFunc,
 
       switch (alg) {
          case Spectrum:
-            PowerSpectrum(mWindowSize, in, out);
+            PowerSpectrum(mWindowSize, in.get(), out.get());
 
             for (size_t i = 0; i < half; i++)
                mProcessed[i] += out[i];
@@ -1247,7 +1249,7 @@ bool SpectrumAnalyst::Calculate(Algorithm alg, int windowFunc,
          case EnhancedAutocorrelation:
 
             // Take FFT
-            RealFFT(mWindowSize, in, out, out2);
+            RealFFT(mWindowSize, in.get(), out.get(), out2.get());
             // Compute power
             for (size_t i = 0; i < mWindowSize; i++)
                in[i] = (out[i] * out[i]) + (out2[i] * out2[i]);
@@ -1265,7 +1267,7 @@ bool SpectrumAnalyst::Calculate(Algorithm alg, int windowFunc,
                   in[i] = pow(in[i], 1.0f / 3.0f);
             }
             // Take FFT
-            RealFFT(mWindowSize, in, out, out2);
+            RealFFT(mWindowSize, in.get(), out.get(), out2.get());
 
             // Take real part of result
             for (size_t i = 0; i < half; i++)
@@ -1273,7 +1275,8 @@ bool SpectrumAnalyst::Calculate(Algorithm alg, int windowFunc,
             break;
 
          case Cepstrum:
-            RealFFT(mWindowSize, in, out, out2);
+            RealFFT(mWindowSize, in.get(), out.get(), out2.get());
+
             // Compute log power
             // Set a sane lower limit assuming maximum time amplitude of 1.0
             {
@@ -1288,7 +1291,7 @@ bool SpectrumAnalyst::Calculate(Algorithm alg, int windowFunc,
                      in[i] = log(power);
                }
                // Take IFFT
-               InverseRealFFT(mWindowSize, in, NULL, out);
+               InverseRealFFT(mWindowSize, in.get(), NULL, out.get());
 
                // Take real part of result
                for (size_t i = 0; i < half; i++)
@@ -1406,11 +1409,6 @@ bool SpectrumAnalyst::Calculate(Algorithm alg, int windowFunc,
       wxASSERT(false);
       break;
    }
-
-   delete[]in;
-   delete[]out;
-   delete[]out2;
-   delete[]win;
 
    if (pYMin)
       *pYMin = mYMin;

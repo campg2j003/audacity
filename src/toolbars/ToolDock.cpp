@@ -334,7 +334,7 @@ IMPLEMENT_CLASS( ToolDock, wxPanelWrapper );
 //
 // Custom event
 //
-DEFINE_EVENT_TYPE( EVT_TOOLBAR_FLOAT );
+//DEFINE_EVENT_TYPE( EVT_TOOLBAR_FLOAT );
 
 BEGIN_EVENT_TABLE( ToolDock, wxPanelWrapper )
    EVT_GRABBER( wxID_ANY, ToolDock::OnGrabber )
@@ -356,7 +356,7 @@ ToolDock::ToolDock( ToolManager *manager, wxWindow *parent, int dockid ):
    // Init
    mManager = manager;
    memset(mBars, 0, sizeof(mBars)); // otherwise uninitialized
-
+   SetBackgroundColour(theTheme.Colour( clrMedium ));
    // Use for testing gaps
    // SetOwnBackgroundColour( wxColour( 255, 0, 0 ) );
 }
@@ -835,13 +835,8 @@ void ToolDock::OnGrabber( GrabberEvent & event )
 {
    // auto pos = event.GetPosition();
    if (!event.IsEscaping()) {
-      ToolBar *t = mBars[ event.GetId() ];
-
       // Pass it on to the manager since it isn't in the handling hierarchy
       mManager->ProcessEvent( event );
-
-      // We no longer have control
-      mConfiguration.Remove( t );
    }
 }
 
@@ -872,11 +867,10 @@ void ToolDock::OnPaint( wxPaintEvent & WXUNUSED(event) )
 
    // Start with a clean background
    //
-   // Under GTK, we specifically set the toolbar background to the background
-   // colour in the system theme.
-#if defined( __WXGTK__ )
-   dc.SetBackground( wxBrush( wxSystemSettings::GetColour( wxSYS_COLOUR_BACKGROUND ) ) );
-#endif
+   // Under GTK, we don't set the toolbar background to the background
+   // colour in the system theme.  Instead we use our own colour.
+
+   dc.SetBackground( wxBrush( theTheme.Colour( clrMedium )));
    dc.Clear();
 
    // Set the gap color

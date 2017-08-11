@@ -60,7 +60,7 @@ void WarningsPrefs::PopulateOrExchange(ShuttleGui & S)
       S.TieCheckBox(_("Saving &empty project"),
                     wxT("/GUI/EmptyCanBeDirty"),
                     true);
-      S.TieCheckBox(_("&Low disk space at program start up"),
+      S.TieCheckBox(_("&Low disk space at launch or new project"),
                     wxT("/Warnings/DiskSpaceWarning"),
                     true);
       S.TieCheckBox(_("Mixing down to &mono during export"),
@@ -79,12 +79,17 @@ void WarningsPrefs::PopulateOrExchange(ShuttleGui & S)
    S.EndStatic();
 }
 
-bool WarningsPrefs::Apply()
+bool WarningsPrefs::Commit()
 {
    ShuttleGui S(this, eIsSavingToPrefs);
    PopulateOrExchange(S);
 
    return true;
+}
+
+wxString WarningsPrefs::HelpPageName()
+{
+   return "Warnings_Preferences";
 }
 
 PrefsPanel *WarningsPrefsFactory::Create(wxWindow *parent)

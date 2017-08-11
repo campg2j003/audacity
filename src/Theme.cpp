@@ -61,6 +61,7 @@ and use it for toolbar and window layouts too.
 #include <wx/ffile.h>
 #include <wx/mstream.h>
 #include <wx/msgdlg.h>
+#include <wx/settings.h>
 
 #include "Project.h"
 #include "toolbars/ToolBar.h"
@@ -72,6 +73,8 @@ and use it for toolbar and window layouts too.
 #include "AllThemeResources.h"  // can remove this later, only needed for 'XPMS_RETIRED'.
 #include "FileNames.h"
 #include "Prefs.h"
+#include "AColor.h"
+#include "ImageManipulation.h"
 
 #include <wx/arrimpl.cpp>
 
@@ -188,8 +191,18 @@ WX_DEFINE_USER_EXPORTED_OBJARRAY( ArrayOfColours )
 #include "AllThemeResources.h"
 
 // Include the ImageCache...
-static unsigned char ImageCacheAsData[] = {
-#include "ThemeAsCeeCode.h"
+
+static const unsigned char DarkImageCacheAsData[] = {
+#include "DarkThemeAsCeeCode.h"
+};
+static const unsigned char LightImageCacheAsData[] = {
+#include "LightThemeAsCeeCode.h"
+};
+static const unsigned char ClassicImageCacheAsData[] = {
+#include "ClassicThemeAsCeeCode.h"
+};
+static const unsigned char HiContrastImageCacheAsData[] = {
+#include "HiContrastThemeAsCeeCode.h"
 };
 
 // theTheme is a global variable.
@@ -217,14 +230,28 @@ void Theme::EnsureInitialised()
    RegisterExtraThemeResources();
 #endif
 
-   bool bLoadThemeAtStart;
-   gPrefs->Read( wxT("/Theme/LoadAtStart"), &bLoadThemeAtStart, false );
-   LoadThemeAtStartUp( bLoadThemeAtStart );
+   LoadPreferredTheme();
+
+}
+
+bool ThemeBase::LoadPreferredTheme()
+{
+// DA: Default themes differ.
+#ifdef EXPERIMENTAL_DA
+   wxString theme = gPrefs->Read(wxT("/GUI/Theme"), wxT("dark"));
+#else
+   wxString theme = gPrefs->Read(wxT("/GUI/Theme"), wxT("light"));
+#endif
+
+   theTheme.LoadTheme( theTheme.ThemeTypeOfTypeName( theme ) );
+   return true;
 }
 
 void Theme::ApplyUpdatedImages()
 {
+   AColor::ReInit();
    AudacityProject *p = GetActiveProject();
+   p->ApplyUpdatedTheme();
    for( int ii = 0; ii < ToolBarCount; ++ii )
    {
       ToolBar *pToolBar = p->GetToolManager()->GetToolBar(ii);
@@ -255,6 +282,8 @@ void Theme::RegisterColours()
 
 ThemeBase::ThemeBase(void)
 {
+   bRecolourOnLoad = false;
+   bIsUsingSystemTextColour = false;
 }
 
 ThemeBase::~ThemeBase(void)
@@ -262,41 +291,16 @@ ThemeBase::~ThemeBase(void)
 }
 
 /// This function is called to load the initial Theme images.
-/// There are many possible choices for what this function
-/// should do, as we have (potentially) four sources of images.
-///   - (deprecated) programmed in XPMs.
-///   - Programmed in in-built theme.
-///   - External image Cache file.
-///   - External component files.
-///
-/// We currently still have the deprecated XPMs, so we have
-/// those being used if the user decides not to load themes.
-///
-/// @param bLookForExternalFiles uses file iff true.
-void ThemeBase::LoadThemeAtStartUp( bool bLookForExternalFiles )
+/// It does not though cause the GUI to refresh.
+void ThemeBase::LoadTheme( teThemeType Theme )
 {
    EnsureInitialised();
-
-   const bool cbBinaryRead =true;
    const bool cbOkIfNotFound = true;
 
-   // IF not interested in external files,
-   // THEN just use the internal default set.
-   if( !bLookForExternalFiles )
-   {
-      // IF the XPMs have been retired, THEN we'd better use the built-in cache
-      // at start up.
-      // ELSE do nothing, we already have XPM based images.
-#ifdef XPMS_RETIRED
-      ReadThemeInternal();
-#endif
-      return;
-   }
-   // ELSE IF can't read the external image cache.
-   else if( !ReadImageCache( cbBinaryRead, cbOkIfNotFound ) )
+   if( !ReadImageCache( Theme, cbOkIfNotFound ) )
    {
       // THEN get the default set.
-      ReadThemeInternal();
+      ReadImageCache( GetFallbackThemeType(), !cbOkIfNotFound );
 
       // JKC: Now we could go on and load the individual images
       // on top of the default images using the commented out
@@ -319,11 +323,85 @@ void ThemeBase::LoadThemeAtStartUp( bool bLookForExternalFiles )
 #endif
    }
 
+   RotateImageInto( bmpRecordBeside, bmpRecordBelow, false );
+   RotateImageInto( bmpRecordBesideDisabled, bmpRecordBelowDisabled, false );
+
+   if( bRecolourOnLoad )
+      RecolourTheme();
+
+   wxColor Back        = theTheme.Colour( clrTrackInfo );
+   wxColor CurrentText = theTheme.Colour( clrTrackPanelText );
+   wxColor DesiredText = wxSystemSettings::GetColour( wxSYS_COLOUR_WINDOWTEXT );
+
+   int TextColourDifference =  ColourDistance( CurrentText, DesiredText );
+
+   bIsUsingSystemTextColour = ( TextColourDifference == 0 );
+   // Theming is very accepting of alternative text colours.  They just need to 
+   // have decent contrast to the background colour, if we're blending themes. 
+   if( !bIsUsingSystemTextColour ){
+      int ContrastLevel        =  ColourDistance( Back, DesiredText );
+      bIsUsingSystemTextColour = bRecolourOnLoad && (ContrastLevel > 250);
+      if( bIsUsingSystemTextColour )
+         Colour( clrTrackPanelText ) = DesiredText;
+   }
+   bRecolourOnLoad = false;
+
    // Next line is not required as we haven't yet built the GUI
    // when this function is (or should be) called.
    // ApplyUpdatedImages();
 }
 
+void ThemeBase::RecolourBitmap( int iIndex, wxColour From, wxColour To )
+{
+   wxImage Image( Bitmap( iIndex ).ConvertToImage() );
+
+   std::unique_ptr<wxImage> pResult = ChangeImageColour(
+      &Image, From, To );
+   ReplaceImage( iIndex, pResult.get() );
+}
+
+int ThemeBase::ColourDistance( wxColour & From, wxColour & To ){
+   return 
+      abs( From.Red() - To.Red() )
+      + abs( From.Green() - To.Green() )
+      + abs( From.Blue() - To.Blue() );
+}
+
+// This function coerces a theme to be more like the system colours.
+// Only used for built in themes.  For custom themes a user
+// will choose a better theme for them and just not use a mismatching one.
+void ThemeBase::RecolourTheme()
+{
+   wxColour From = Colour( clrMedium );
+#if defined( __WXGTK__ )
+   wxColour To = wxSystemSettings::GetColour( wxSYS_COLOUR_BACKGROUND );
+#else
+   wxColour To = wxSystemSettings::GetColour( wxSYS_COLOUR_3DFACE );
+#endif
+   // only recolour if recolouring is slight.
+   int d = ColourDistance( From, To );
+
+   // Don't recolour if difference is too big.
+   if( d  > 120 )
+      return;
+
+   // A minor tint difference from standard does not need 
+   // to be recouloured either.  Includes case of d==0 which is nothing
+   // needs to be done.
+   if( d < 40 )
+      return;
+
+   Colour( clrMedium ) = To;
+   RecolourBitmap( bmpUpButtonLarge, From, To );
+   RecolourBitmap( bmpDownButtonLarge, From, To );
+   RecolourBitmap( bmpHiliteButtonLarge, From, To );
+   RecolourBitmap( bmpUpButtonSmall, From, To );
+   RecolourBitmap( bmpDownButtonSmall, From, To );
+   RecolourBitmap( bmpHiliteButtonSmall, From, To );
+
+   Colour( clrTrackInfo ) = To;
+   RecolourBitmap( bmpUpButtonExpand, From, To );
+}
 
 wxImage ThemeBase::MaskedImage( char const ** pXpm, char const ** pMask )
 {
@@ -347,7 +425,9 @@ wxImage ThemeBase::MaskedImage( char const ** pXpm, char const ** pMask )
 
 //   unsigned char *src = Img1.GetData();
    unsigned char *mk = Img2.GetData();
-   unsigned char *alpha = (unsigned char*)malloc( nBytes );
+   //wxImage::setAlpha requires memory allocated with malloc, not NEW
+   MallocString<unsigned char> alpha{
+      static_cast<unsigned char*>(malloc( nBytes )) };
 
    // Extract alpha channel from second XPM.
    for(i=0;i<nBytes;i++)
@@ -356,7 +436,7 @@ wxImage ThemeBase::MaskedImage( char const ** pXpm, char const ** pMask )
       mk+=3;
    }
 
-   Img1.SetAlpha( alpha);
+   Img1.SetAlpha( alpha.release() );
 
    //dmazzoni: the top line does not work on wxGTK
    //wxBitmap Result( Img1, 32 );
@@ -400,6 +480,7 @@ void ThemeBase::RegisterImage( int &iIndex, const wxImage &Image, const wxString
 
    mBitmapNames.Add( Name );
    mBitmapFlags.Add( mFlow.mFlags );
+   mFlow.mFlags &= ~resFlagSkip;
    iIndex = mBitmaps.GetCount()-1;
 }
 
@@ -422,6 +503,7 @@ void FlowPacker::Init(int width)
    myHeight = 0;
    iImageGroupSize = 1;
    SetNewGroup(1);
+   mBorderWidth = 0;
 }
 
 void FlowPacker::SetNewGroup( int iGroupSize )
@@ -447,11 +529,15 @@ void FlowPacker::SetColourGroup( )
 
 void FlowPacker::GetNextPosition( int xSize, int ySize )
 {
+   xSize += 2*mBorderWidth;
+   ySize += 2*mBorderWidth;
    // if the height has increased, then we are on a NEW group.
-   if(( ySize > myHeight )||(mFlags != mOldFlags ))
+   if(( ySize > myHeight )||(((mFlags ^ mOldFlags )& ~resFlagSkip)!=0))
    {
       SetNewGroup( ((mFlags & resFlagPaired)!=0) ? 2 : 1 );
       myHeight = ySize;
+//      mFlags &= ~resFlagNewLine;
+//      mOldFlags = mFlags;
    }
 
    iImageGroupIndex++;
@@ -476,6 +562,11 @@ void FlowPacker::GetNextPosition( int xSize, int ySize )
 wxRect FlowPacker::Rect()
 {
    return wxRect( mxPos, myPos, mComponentWidth, mComponentHeight);
+}
+
+wxRect FlowPacker::RectInner()
+{
+   return Rect().Deflate( mBorderWidth, mBorderWidth );
 }
 
 void FlowPacker::RectMid( int &x, int &y )
@@ -511,7 +602,12 @@ int SourceOutputStream::OpenFile(const wxString & Filename)
    bOk = File.Open( Filename, wxFile::write );
    if( bOk )
    {
+// DA: Naming of output sourcery
+#ifdef EXPERIMENTAL_DA
+      File.Write( wxT("//   DarkThemeAsCeeCode.h\r\n") );
+#else
       File.Write( wxT("//   ThemeAsCeeCode.h\r\n") );
+#endif
       File.Write( wxT("//\r\n") );
       File.Write( wxT("//   This file was Auto-Generated.\r\n") );
       File.Write( wxT("//   It is included by Theme.cpp.\r\n") );
@@ -570,6 +666,7 @@ void ThemeBase::CreateImageCache( bool bBinarySave )
    int i;
 
    mFlow.Init( ImageCacheWidth );
+   mFlow.mBorderWidth =1;
 
 //#define IMAGE_MAP
 #ifdef IMAGE_MAP
@@ -585,7 +682,13 @@ void ThemeBase::CreateImageCache( bool bBinarySave )
       if( (mBitmapFlags[i] & resFlagInternal)==0)
       {
          mFlow.GetNextPosition( SrcImage.GetWidth(), SrcImage.GetHeight());
-         PasteSubImage( &ImageCache, &SrcImage, mFlow.mxPos, mFlow.myPos );
+         ImageCache.SetRGB( mFlow.Rect(), 0xf2, 0xb0, 0x27 );
+         if( (mFlow.mFlags & resFlagSkip) == 0 )
+            PasteSubImage( &ImageCache, &SrcImage, 
+               mFlow.mxPos + mFlow.mBorderWidth, 
+               mFlow.myPos + mFlow.mBorderWidth);
+         else
+            ImageCache.SetRGB( mFlow.RectInner(), 1,1,1);
 #ifdef IMAGE_MAP
          // No href in html.  Uses title not alt.
          wxRect R( mFlow.Rect() );
@@ -605,7 +708,8 @@ void ThemeBase::CreateImageCache( bool bBinarySave )
    {
       mFlow.GetNextPosition( iColSize, iColSize );
       wxColour c = mColours[i];
-      ImageCache.SetRGB( mFlow.Rect(), c.Red(), c.Green(), c.Blue() );
+      ImageCache.SetRGB( mFlow.Rect() , 0xf2, 0xb0, 0x27 );
+      ImageCache.SetRGB( mFlow.RectInner() , c.Red(), c.Green(), c.Blue() );
 
       // YUCK!  No function in wxWidgets to set a rectangle of alpha...
       for(x=0;x<iColSize;x++)
@@ -628,7 +732,7 @@ void ThemeBase::CreateImageCache( bool bBinarySave )
    wxLogDebug( "</map>" );
 #endif
 
-   // IF nBinarySave, THEN saving to a normal PNG file.
+   // IF bBinarySave, THEN saving to a normal PNG file.
    if( bBinarySave )
    {
       const wxString &FileName = FileNames::ThemeCachePng();
@@ -644,6 +748,14 @@ void ThemeBase::CreateImageCache( bool bBinarySave )
                FileName.c_str() ));
          return;
       }
+#endif
+#if 0
+      // Deliberate policy to use the fast/cheap blocky pixel-multiplication
+      // algorithm, as this introduces no artifacts on repeated scale up/down.
+      ImageCache.Rescale( 
+         ImageCache.GetWidth()*4,
+         ImageCache.GetHeight()*4,
+         wxIMAGE_QUALITY_NEAREST );
 #endif
       if( !ImageCache.SaveFile( FileName, wxBITMAP_TYPE_PNG ))
       {
@@ -695,14 +807,16 @@ void ThemeBase::WriteImageMap( )
 
    int i;
    mFlow.Init( ImageCacheWidth );
+   mFlow.mBorderWidth = 1;
 
    wxFFile File( FileNames::ThemeCacheHtm(), wxT("wb") );// I'll put in NEW lines explicitly.
    if( !File.IsOpened() )
       return;
 
    File.Write( wxT("<html>\r\n"));
-   File.Write( wxT("<body>\r\n"));
-   File.Write( wxT("<img src=\"ImageCache.png\" usemap=\"#map1\">\r\n" ));
+   File.Write( wxT("<body bgcolor=\"303030\">\r\n"));
+   wxString Temp = wxString::Format( wxT("<img src=\"ImageCache.png\" width=\"%i\" usemap=\"#map1\">\r\n" ), ImageCacheWidth );
+   File.Write( Temp );
    File.Write( wxT("<map name=\"map1\">\r\n") );
 
    for(i=0;i<(int)mImages.GetCount();i++)
@@ -713,7 +827,7 @@ void ThemeBase::WriteImageMap( )
       {
          mFlow.GetNextPosition( SrcImage.GetWidth(), SrcImage.GetHeight());
          // No href in html.  Uses title not alt.
-         wxRect R( mFlow.Rect() );
+         wxRect R( mFlow.RectInner() );
          File.Write( wxString::Format(
             wxT("<area title=\"Bitmap:%s\" shape=rect coords=\"%i,%i,%i,%i\">\r\n"),
             mBitmapNames[i].c_str(),
@@ -727,7 +841,7 @@ void ThemeBase::WriteImageMap( )
    {
       mFlow.GetNextPosition( iColSize, iColSize );
       // No href in html.  Uses title not alt.
-      wxRect R( mFlow.Rect() );
+      wxRect R( mFlow.RectInner() );
       File.Write( wxString::Format( wxT("<area title=\"Colour:%s\" shape=rect coords=\"%i,%i,%i,%i\">\r\n"),
          mColourNames[i].c_str(),
          R.GetLeft(), R.GetTop(), R.GetRight(), R.GetBottom()) );
@@ -779,7 +893,29 @@ void ThemeBase::WriteImageDefs( )
 }
 
 
+teThemeType ThemeBase::GetFallbackThemeType(){
+// Fallback must be an internally supported type,
+// to guarantee it is found.
+#ifdef EXPERIMENTAL_DA
+   return themeDark;
+#else
+   return themeLight;
+#endif
+}
 
+teThemeType ThemeBase::ThemeTypeOfTypeName( const wxString & Name )
+{
+   wxArrayString aThemes;
+   aThemes.Add( "classic" );
+   aThemes.Add( "dark" );
+   aThemes.Add( "light" );
+   aThemes.Add( "high-contrast" );
+   aThemes.Add( "custom" );
+   int themeIx = aThemes.Index( Name );
+   if( themeIx < 0 )
+      return GetFallbackThemeType();
+   return (teThemeType)themeIx;
+}
 
 
 
@@ -788,7 +924,7 @@ void ThemeBase::WriteImageDefs( )
 ///   otherwise the data is taken from a compiled in block of memory.
 /// @param bOkIfNotFound if true means do not report absent file.
 /// @return true iff we loaded the images.
-bool ThemeBase::ReadImageCache( bool bBinaryRead, bool bOkIfNotFound)
+bool ThemeBase::ReadImageCache( teThemeType type, bool bOkIfNotFound)
 {
    EnsureInitialised();
    wxImage ImageCache;
@@ -800,8 +936,9 @@ bool ThemeBase::ReadImageCache( bool bBinaryRead, bool bOkIfNotFound)
 //      ImageCache.InitAlpha();
 //   }
 
-   // IF bBinary read THEN a normal read from a PNG file
-   if(  bBinaryRead )
+   gPrefs->Read(wxT("/GUI/BlendThemes"), &bRecolourOnLoad, true);
+
+   if(  type == themeFromFile )
    {
       const wxString &FileName = FileNames::ThemeCachePng();
       if( !wxFileExists( FileName ))
@@ -827,8 +964,30 @@ bool ThemeBase::ReadImageCache( bool bBinaryRead, bool bOkIfNotFound)
    // ELSE we are reading from internal storage.
    else
    {
-      wxMemoryInputStream InternalStream(
-         (char *)ImageCacheAsData, sizeof(ImageCacheAsData));
+      size_t ImageSize = 0;
+      const unsigned char * pImage = nullptr;
+      switch( type ){
+         default: 
+         case themeClassic : 
+            ImageSize = sizeof(ClassicImageCacheAsData);
+            pImage = ClassicImageCacheAsData;
+            break;
+         case themeLight : 
+            ImageSize = sizeof(LightImageCacheAsData);
+            pImage = LightImageCacheAsData;
+            break;
+         case themeDark : 
+            ImageSize = sizeof(DarkImageCacheAsData);
+            pImage = DarkImageCacheAsData;
+            break;
+         case themeHiContrast : 
+            ImageSize = sizeof(HiContrastImageCacheAsData);
+            pImage = HiContrastImageCacheAsData;
+            break;
+      }
+      //wxLogDebug("Reading ImageCache %p size %i", pImage, ImageSize );
+      wxMemoryInputStream InternalStream( pImage, ImageSize );
+
       if( !ImageCache.LoadFile( InternalStream, wxBITMAP_TYPE_PNG ))
       {
          // If we get this message, it means that the data in file
@@ -838,10 +997,17 @@ bool ThemeBase::ReadImageCache( bool bBinaryRead, bool bOkIfNotFound)
          wxMessageBox(_("Audacity could not read its default theme.\nPlease report the problem."));
          return false;
       }
+      //wxLogDebug("Read %i by %i", ImageCache.GetWidth(), ImageCache.GetHeight() );
    }
 
+   // Resize a large image down.
+   if( ImageCache.GetWidth() > ImageCacheWidth ){
+      int h = ImageCache.GetHeight() * ((1.0*ImageCacheWidth)/ImageCache.GetWidth());
+      ImageCache.Rescale(  ImageCacheWidth, h );
+   }
    int i;
    mFlow.Init(ImageCacheWidth);
+   mFlow.mBorderWidth = 1;
    // Load the bitmaps
    for(i=0;i<(int)mImages.GetCount();i++)
    {
@@ -851,7 +1017,7 @@ bool ThemeBase::ReadImageCache( bool bBinaryRead, bool bOkIfNotFound)
       {
          mFlow.GetNextPosition( Image.GetWidth(),Image.GetHeight() );
          //      wxLogDebug(wxT("Copy at %i %i (%i,%i)"), mxPos, myPos, xWidth1, yHeight1 );
-         Image = GetSubImageWithAlpha( ImageCache, mFlow.Rect());
+         Image = GetSubImageWithAlpha( ImageCache, mFlow.RectInner() );
          mBitmaps[i] = wxBitmap(Image);
       }
    }
@@ -1011,11 +1177,6 @@ void ThemeBase::SaveComponents()
          FileNames::ThemeComponentsDir().c_str() ));
 }
 
-void ThemeBase::ReadThemeInternal()
-{
-   // false indicates not using standard binary method.
-   ReadImageCache( false );
-}
 
 void ThemeBase::SaveThemeAsCode()
 {
@@ -1098,4 +1259,9 @@ void ThemeBase::ReplaceImage( int iIndex, wxImage * pImage )
    Bitmap( iIndex ) = wxBitmap( *pImage );
 }
 
-
+void ThemeBase::RotateImageInto( int iTo, int iFrom, bool bClockwise )
+{
+   wxImage img(theTheme.Bitmap( iFrom ).ConvertToImage() );
+   wxImage img2 = img.Rotate90( bClockwise );
+   ReplaceImage( iTo, &img2 );
+}

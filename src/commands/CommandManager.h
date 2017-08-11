@@ -15,6 +15,7 @@
 #include "../Experimental.h"
 
 #include "CommandFunctors.h"
+#include "CommandFlag.h"
 
 #include "../MemoryX.h"
 #include <vector>
@@ -23,7 +24,6 @@
 #include <wx/menu.h>
 #include <wx/hashmap.h>
 
-#include "../AudacityApp.h"
 #include "../xml/XMLTagHandler.h"
 
 #include "audacity/Types.h"
@@ -72,6 +72,7 @@ struct CommandListEntry
    bool skipKeydown;
    bool wantKeyup;
    bool isGlobal;
+   bool isOccult;
    CommandFlag flags;
    CommandMask mask;
 };
@@ -104,6 +105,7 @@ class AUDACITY_DLL_API CommandManager final : public XMLTagHandler
    CommandManager(const CommandManager&) PROHIBITED;
    CommandManager &operator= (const CommandManager&) PROHIBITED;
 
+   void SetMaxList();
    void PurgeData();
 
    //
@@ -186,6 +188,9 @@ class AUDACITY_DLL_API CommandManager final : public XMLTagHandler
    CommandFlag GetDefaultFlags() const { return mDefaultFlags; }
    CommandMask GetDefaultMask() const { return mDefaultMask; }
 
+   void SetOccultCommands( bool bOccult);
+
+
    void SetCommandFlags(const wxString &name, CommandFlag flags, CommandMask mask);
    void SetCommandFlags(const wxChar **names,
                         CommandFlag flags, CommandMask mask);
@@ -221,7 +226,7 @@ class AUDACITY_DLL_API CommandManager final : public XMLTagHandler
    // Lyrics and MixerTrackCluster classes use it.
    bool FilterKeyEvent(AudacityProject *project, const wxKeyEvent & evt, bool permit = false);
    bool HandleMenuID(int id, CommandFlag flags, CommandMask mask);
-   bool HandleTextualCommand(wxString & Str, CommandFlag flags, CommandMask mask);
+   bool HandleTextualCommand(const wxString & Str, CommandFlag flags, CommandMask mask);
 
    //
    // Accessing
@@ -241,7 +246,7 @@ class AUDACITY_DLL_API CommandManager final : public XMLTagHandler
    wxString GetLabelFromName(const wxString &name);
    wxString GetPrefixedLabelFromName(const wxString &name);
    wxString GetCategoryFromName(const wxString &name);
-   wxString GetKeyFromName(const wxString &name);
+   wxString GetKeyFromName(const wxString &name) const;
    wxString GetDefaultKeyFromName(const wxString &name);
 
    bool GetEnabled(const wxString &name);
@@ -254,7 +259,20 @@ class AUDACITY_DLL_API CommandManager final : public XMLTagHandler
    // Loading/Saving
    //
 
-   void WriteXML(XMLWriter &xmlFile) /* not override */;
+   void WriteXML(XMLWriter &xmlFile) const /* not override */;
+   void TellUserWhyDisallowed(const wxString & Name, CommandFlag flagsGot, CommandFlag flagsRequired);
+
+   ///
+   /// Formatting summaries that include shortcut keys
+   ///
+   wxString DescribeCommandsAndShortcuts
+      (// An array, alternating user-visible strings, and
+       // non-user-visible command names.  If a shortcut key is defined
+       // for the command, then it is appended, parenthesized, after the
+       // user-visible string.
+       const std::vector<wxString> &commands,
+       // If more than one pair of strings is given, then use this separator.
+       const wxString &separator = wxT(" / ")) const;
 
 protected:
 
@@ -284,7 +302,6 @@ protected:
    //
 
    bool HandleCommandEntry(const CommandListEntry * entry, CommandFlag flags, CommandMask mask, const wxEvent * evt = NULL);
-   void TellUserWhyDisallowed(CommandFlag flagsGot, CommandFlag flagsRequired);
 
    //
    // Modifying
@@ -301,6 +318,7 @@ protected:
    wxMenu * CurrentSubMenu() const;
    wxMenu * CurrentMenu() const;
    wxString GetLabel(const CommandListEntry *entry) const;
+   wxString GetLabelWithDisabledAccel(const CommandListEntry *entry) const;
 
    //
    // Loading/Saving
@@ -311,6 +329,9 @@ protected:
    XMLTagHandler *HandleXMLChild(const wxChar *tag) override;
 
 private:
+   // mMaxList only holds shortcuts that should not be added (by default).
+   wxSortedArrayString mMaxListOnly;
+
    MenuBarList  mMenuBarList;
    SubMenuList  mSubMenuList;
    CommandList  mCommandList;
@@ -328,6 +349,7 @@ private:
 
    CommandFlag mDefaultFlags;
    CommandMask mDefaultMask;
+   bool bMakingOccultCommands;
 };
 
 #endif

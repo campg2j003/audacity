@@ -42,6 +42,12 @@ wxString EffectSilence::GetDescription()
    return XO("Creates audio of zero amplitude");
 }
 
+wxString EffectSilence::ManualPage()
+{
+   return wxT("Generate_Menu#silence");
+}
+
+
 // EffectIdentInterface implementation
 
 EffectType EffectSilence::GetType()
@@ -97,7 +103,6 @@ bool EffectSilence::GenerateTrack(WaveTrack *tmp,
                                   const WaveTrack & WXUNUSED(track),
                                   int WXUNUSED(ntrack))
 {
-   bool bResult = tmp->InsertSilence(0.0, GetDuration());
-   wxASSERT(bResult);
-   return bResult;
+   tmp->InsertSilence(0.0, GetDuration());
+   return true;
 }

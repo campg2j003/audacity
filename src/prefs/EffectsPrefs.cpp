@@ -19,9 +19,9 @@
 
 #include "../Audacity.h"
 
+#include <wx/choice.h>
 #include <wx/defs.h>
 
-#include "../AudacityApp.h"
 #include "../Languages.h"
 #include "../PluginManager.h"
 #include "../Prefs.h"
@@ -116,14 +116,14 @@ void EffectsPrefs::PopulateOrExchange(ShuttleGui & S)
          prefsgroups.Add(wxT("groupby:publisher"));
          prefsgroups.Add(wxT("groupby:type"));
 
-         wxChoice *c = S.TieChoice(_("Effects in menus are:"),
+         wxChoice *c = S.TieChoice(_("S&ort or Group:"),
                                    wxT("/Effects/GroupBy"),
                                    wxT("name"),
                                    visualgroups,
                                    prefsgroups);
          c->SetMinSize(c->GetBestSize());
                      
-         S.TieNumericTextBox(_("Maximum effects per group (0 to disable):"),
+         S.TieNumericTextBox(_("&Maximum effects per group (0 to disable):"),
                              wxT("/Effects/MaxPerGroup"),
 #if defined(__WXGTK__)
                              15,
@@ -160,12 +160,17 @@ void EffectsPrefs::PopulateOrExchange(ShuttleGui & S)
 #endif
 }
 
-bool EffectsPrefs::Apply()
+bool EffectsPrefs::Commit()
 {
    ShuttleGui S(this, eIsSavingToPrefs);
    PopulateOrExchange(S);
 
    return true;
+}
+
+wxString EffectsPrefs::HelpPageName()
+{
+   return "Effects_Preferences";
 }
 
 PrefsPanel *EffectsPrefsFactory::Create(wxWindow *parent)

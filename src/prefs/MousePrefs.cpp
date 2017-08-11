@@ -189,12 +189,17 @@ void MousePrefs::AddItem(wxString const & buttons, wxString const & tool,
 
 /// Update the preferences stored on disk.
 /// Currently does nothing as Mouse Preferences don't change.
-bool MousePrefs::Apply()
+bool MousePrefs::Commit()
 {
 // Not yet required...
 //   ShuttleGui S(this, eIsSavingToPrefs);
 //   PopulateOrExchange(S);
    return true;
+}
+
+wxString MousePrefs::HelpPageName()
+{
+   return "Mouse_Preferences";
 }
 
 PrefsPanel *MousePrefsFactory::Create(wxWindow *parent)

@@ -102,6 +102,7 @@ am__aclocal_m4_deps = $(top_srcdir)/m4/ac_c99_func_lrint.m4 \
 	$(top_srcdir)/m4/audacity_checklib_libvorbis.m4 \
 	$(top_srcdir)/m4/audacity_checklib_lv2.m4 \
 	$(top_srcdir)/m4/audacity_checklib_portaudio.m4 \
+	$(top_srcdir)/m4/audacity_checklib_portmidi.m4 \
 	$(top_srcdir)/m4/audacity_checklib_portsmf.m4 \
 	$(top_srcdir)/m4/audacity_checklib_widgetextra.m4 \
 	$(top_srcdir)/m4/ax_cflags_strict_prototypes.m4 \
@@ -110,6 +111,7 @@ am__aclocal_m4_deps = $(top_srcdir)/m4/ac_c99_func_lrint.m4 \
 	$(top_srcdir)/m4/ax_compiler_vendor.m4 \
 	$(top_srcdir)/m4/ax_cxx_check_flag.m4 \
 	$(top_srcdir)/m4/ax_cxxcpp_check_flag.m4 \
+	$(top_srcdir)/m4/ax_gcc_version_atleast.m4 \
 	$(top_srcdir)/m4/ax_ld_check_flag.m4 \
 	$(top_srcdir)/m4/gettext.m4 $(top_srcdir)/m4/iconv.m4 \
 	$(top_srcdir)/m4/intlmacosx.m4 $(top_srcdir)/m4/lib-ld.m4 \
@@ -526,6 +528,8 @@ PATH_SEPARATOR = @PATH_SEPARATOR@
 PKG_CONFIG = @PKG_CONFIG@
 PORTAUDIO_CFLAGS = @PORTAUDIO_CFLAGS@
 PORTAUDIO_LIBS = @PORTAUDIO_LIBS@
+PORTMIDI_CFLAGS = @PORTMIDI_CFLAGS@
+PORTMIDI_LIBS = @PORTMIDI_LIBS@
 PORTMIXER_LIBS = @PORTMIXER_LIBS@
 PORTSMF_CFLAGS = @PORTSMF_CFLAGS@
 PORTSMF_LIBS = @PORTSMF_LIBS@

@@ -28,6 +28,7 @@
 
 #include "../ShuttleGui.h"
 #include "../widgets/valnum.h"
+#include "../SampleFormat.h"
 
 // Define keys, defaults, minimums, and maximums for the effect parameters
 //
@@ -57,6 +58,11 @@ wxString EffectEcho::GetSymbol()
 wxString EffectEcho::GetDescription()
 {
    return XO("Repeats the selected audio again and again");
+}
+
+wxString EffectEcho::ManualPage()
+{
+   return wxT("Echo");
 }
 
 // EffectIdentInterface implementation
@@ -95,22 +101,19 @@ bool EffectEcho::ProcessInitialize(sampleCount WXUNUSED(totalLen), ChannelNames 
       if (requestedHistLen !=
             (histLen = static_cast<size_t>(requestedHistLen.as_long_long())))
          throw std::bad_alloc{};
-      history = new float[histLen];
+      history.reinit(histLen, true);
    }
    catch ( const std::bad_alloc& ) {
       wxMessageBox(_("Requested value exceeds memory capacity."));
       return false;
    }
 
-   memset(history, 0, sizeof(float) * histLen);
-   
    return history != NULL;
 }
 
 bool EffectEcho::ProcessFinalize()
 {
-   delete [] history;
-
+   history.reset();
    return true;
 }
 

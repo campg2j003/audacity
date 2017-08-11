@@ -20,6 +20,10 @@ Paul Licameli split from TrackPanel.cpp
 #include "../../TrackPanelAx.h"
 #include "../../ViewInfo.h"
 
+#ifdef EXPERIMENTAL_OUTPUT_DISPLAY
+#include "../../WaveTrack.h"
+#endif
+
 #include <wx/dc.h>
 
 namespace {
@@ -98,14 +102,11 @@ void EditCursorOverlay::Draw(OverlayPanel &panel, wxDC &dc)
    if (auto tp = dynamic_cast<TrackPanel*>(&panel)) {
       wxASSERT(mIsMaster);
       AColor::CursorColor(&dc);
-      TrackPanelCellIterator begin(tp, true);
-      TrackPanelCellIterator end(tp, false);
 
       // Draw cursor in all selected tracks
-      for (; begin != end; ++begin)
+      for ( const auto &data : tp->Cells() )
       {
-         TrackPanelCellIterator::value_type data(*begin);
-         Track *const pTrack = data.first;
+         Track *const pTrack = dynamic_cast<Track*>(data.first.get());
          if (!pTrack)
             continue;
          if (pTrack->GetSelected() ||
@@ -117,11 +118,12 @@ void EditCursorOverlay::Draw(OverlayPanel &panel, wxDC &dc)
             // ^^^ The whole point of this routine.
 
 #ifdef EXPERIMENTAL_OUTPUT_DISPLAY
-            if (MONO_WAVE_PAN(t)){
-               y = t->GetY(true) - mViewInfo->vpos + 1;
-               top = y + kTopInset;
-               bottom = y + t->GetHeight(true) - kTopInset;
-               AColor::Line(dc, mLastCursorX, top, mLastCursorX, bottom);
+            if (MONO_WAVE_PAN(pTrack)){
+               auto y = pTrack->GetY(true) - viewInfo.vpos;
+               auto top = y + kTopMargin;
+               auto height = pTrack->GetHeight(true) - (kTopMargin + kBottomMargin);
+               // - 1 because AColor::Line is inclusive of endpoint
+               AColor::Line(dc, mLastCursorX, top, mLastCursorX, top + height - 1);
             }
 #endif
 

@@ -48,10 +48,20 @@
 // feature to link audio tracks to a label track
 #define EXPERIMENTAL_SYNC_LOCK
 
-// experimental theming
-// Work in progress, June-2008.
-// This mostly sets up a weird color scheme currently.
-//#define EXPERIMENTAL_THEMING
+// JKC: Enable to get extra buttons in the screenshot tools.
+//#define EXPERIMENTAL_DOCS_AUTOMATION
+// JKC: Enable to get experiemental code to move
+// mod-script-pipe towards being mainstream.
+//#define EXPERIMENTAL_AUTOMATION
+
+// DA: Enables dark audacity theme and customisations.
+//#define EXPERIMENTAL_DA
+
+// EXPERIMENTAL_THEMING is mostly mainstream now.
+// the define is still present to mark out old code before theming, that we might
+// conceivably need.
+// TODO: Agree on and then tidy this code.
+#define EXPERIMENTAL_THEMING
 
 //August 2009 - Theming not locked down enough for a stable release.
 // This turns on the Theme panel in Prefs dialog. It is independent of EXPERIMENTAL_THEMING.
@@ -111,7 +121,7 @@
 // Enables MIDI Output of NoteTrack (MIDI) data during playback
 // USE_MIDI must be defined in order for EXPERIMENTAL_MIDI_OUT to work
 #ifdef USE_MIDI
-//#define EXPERIMENTAL_MIDI_OUT
+#define EXPERIMENTAL_MIDI_OUT
 #endif
 
 // USE_MIDI must be defined in order for EXPERIMENTAL_SCOREALIGN to work
@@ -184,16 +194,24 @@
 // scrolling past zero is enabled. Perhaps that lessens confusion.
 #define EXPERIMENTAL_TWO_TONE_TIME_RULER
 
+#ifndef IN_RC
 // Define to include crash reporting
 #include <wx/defs.h>
 #define EXPERIMENTAL_CRASH_REPORT
 #if !defined(wxUSE_DEBUGREPORT) || !wxUSE_DEBUGREPORT
 #undef EXPERIMENTAL_CRASH_REPORT
 #endif
+#endif
 
 // Paul Licameli (PRL) 31 May 2015
 // Zero-padding factor for spectrograms can smooth the display of spectrograms by
 // interpolating in frequency domain.
 #define EXPERIMENTAL_ZERO_PADDED_SPECTROGRAMS
+
+// PRL 11 Jul 2017
+// Highlight more things in TrackPanel when the mouse moves over them,
+// using delibrately ugly pens and brushes until there is better cooperation
+// with themes
+//#define EXPERIMENTAL_TRACK_PANEL_HIGHLIGHTING
 
 #endif

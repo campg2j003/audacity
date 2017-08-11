@@ -52,6 +52,7 @@
 #include "../AllThemeResources.h"
 #include "../ImageManipulation.h"
 #include "../Project.h"
+#include "../tracks/ui/Scrubbing.h"
 #include "../Theme.h"
 
 #include "../Experimental.h"
@@ -83,20 +84,6 @@ ToolsToolBar::ToolsToolBar()
    wxASSERT( zoomTool     == zoomTool     - firstTool );
    wxASSERT( drawTool     == drawTool     - firstTool );
    wxASSERT( multiTool    == multiTool    - firstTool );
-
-   mMessageOfTool[selectTool] = _("Click and drag to select audio");
-
-   mMessageOfTool[envelopeTool] = _("Click and drag to edit the amplitude envelope");
-   mMessageOfTool[drawTool] = _("Click and drag to edit the samples");
-#if defined( __WXMAC__ )
-   mMessageOfTool[zoomTool] = _("Click to Zoom In, Shift-Click to Zoom Out");
-#elif defined( __WXMSW__ )
-   mMessageOfTool[zoomTool] = _("Drag to Zoom Into Region, Right-Click to Zoom Out");
-#elif defined( __WXGTK__ )
-   mMessageOfTool[zoomTool] = _("Left=Zoom In, Right=Zoom Out, Middle=Normal");
-#endif
-   mMessageOfTool[slideTool] = _("Click and drag to move a track in time");
-   mMessageOfTool[multiTool] = wxT(""); // multi-mode tool
 
    bool multiToolActive = false;
    gPrefs->Read(wxT("/GUI/ToolBars/Tools/MultiToolActive"), &multiToolActive);
@@ -186,6 +173,7 @@ AButton * ToolsToolBar::MakeTool( teBmps eTool,
 
 void ToolsToolBar::Populate()
 {
+   SetBackgroundColour( theTheme.Colour( clrMedium  ) );
    MakeButtonBackgroundsSmall();
    Add(mToolSizer = safenew wxGridSizer(2, 3, 1, 1));
 
@@ -205,31 +193,28 @@ void ToolsToolBar::Populate()
 /// Gets the currently active tool
 /// In Multi-mode this might not return the multi-tool itself
 /// since the active tool may be changed by what you hover over.
-int ToolsToolBar::GetCurrentTool()
+int ToolsToolBar::GetCurrentTool() const
 {
    return mCurrentTool;
 }
 
 /// Sets the currently active tool
 /// @param tool - The index of the tool to be used.
-/// @param show - should we update the button display?
-void ToolsToolBar::SetCurrentTool(int tool, bool show)
+void ToolsToolBar::SetCurrentTool(int tool)
 {
    //In multi-mode the current tool is shown by the
    //cursor icon.  The buttons are not updated.
 
    bool leavingMulticlipMode =
-      IsDown(multiTool) && show && tool != multiTool;
+      IsDown(multiTool) && tool != multiTool;
 
    if (leavingMulticlipMode)
       mTool[multiTool]->PopUp();
 
    if (tool != mCurrentTool || leavingMulticlipMode) {
-      if (show)
-         mTool[mCurrentTool]->PopUp();
+      mTool[mCurrentTool]->PopUp();
       mCurrentTool=tool;
-      if (show)
-         mTool[mCurrentTool]->PushDown();
+      mTool[mCurrentTool]->PushDown();
    }
    //JKC: ANSWER-ME: Why is this RedrawAllProjects() line required?
    //msmeyer: I think it isn't, we leave it out for 1.3.1 (beta), and
@@ -237,17 +222,14 @@ void ToolsToolBar::SetCurrentTool(int tool, bool show)
    // RedrawAllProjects();
 
    //msmeyer: But we instruct the projects to handle the cursor shape again
-   if (show)
-   {
-      RefreshCursorForAllProjects();
+   RefreshCursorForAllProjects();
 
-      gPrefs->Write(wxT("/GUI/ToolBars/Tools/MultiToolActive"),
-                    IsDown(multiTool));
-      gPrefs->Flush();
-   }
+   gPrefs->Write(wxT("/GUI/ToolBars/Tools/MultiToolActive"),
+                 IsDown(multiTool));
+   gPrefs->Flush();
 }
 
-bool ToolsToolBar::IsDown(int tool)
+bool ToolsToolBar::IsDown(int tool) const
 {
    return mTool[tool]->IsDown();
 }
@@ -262,15 +244,6 @@ int ToolsToolBar::GetDownTool()
 
    return firstTool;  // Should never happen
 }
-
-const wxChar * ToolsToolBar::GetMessageForTool( int ToolNumber )
-{
-   wxASSERT( ToolNumber >= 0 );
-   wxASSERT( ToolNumber < numTools );
-
-   return mMessageOfTool[ToolNumber];
-}
-
 
 void ToolsToolBar::OnTool(wxCommandEvent & evt)
 {

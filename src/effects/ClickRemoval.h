@@ -38,6 +38,7 @@ public:
 
    wxString GetSymbol() override;
    wxString GetDescription() override;
+   wxString ManualPage() override;
 
    // EffectIdentInterface implementation
 
@@ -61,7 +62,7 @@ private:
    bool ProcessOne(int count, WaveTrack * track,
                    sampleCount start, sampleCount len);
 
-   bool RemoveClicks(int len, float *buffer);
+   bool RemoveClicks(size_t len, float *buffer);
 
    void OnWidthText(wxCommandEvent & evt);
    void OnThreshText(wxCommandEvent & evt);

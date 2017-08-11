@@ -39,17 +39,16 @@ void ModifyAllProjectToolbarMenus();
 
 CommandFlag GetFocusedFrame();
 
+public:
 // If checkActive, do not do complete flags testing on an
 // inactive project as it is needlessly expensive.
 CommandFlag GetUpdateFlags(bool checkActive = false);
 
-double NearestZeroCrossing(double t0);
-
-public:
 //Adds label and returns index of label in labeltrack.
 int DoAddLabel(const SelectedRegion& region, bool preserveFocus = false);
 
 private:
+double NearestZeroCrossing(double t0);
 
         // Selecting a tool from the keyboard
 
@@ -70,7 +69,7 @@ public:
 void OnStop();
 void OnPause();
 void OnRecord();
-void OnRecordAppend();
+void OnRecord2ndChoice();
 void OnStopSelect();
 void OnSkipStart();
 void OnSkipEnd();
@@ -142,6 +141,8 @@ void OnPlaySpeedDec();
 
         // Moving track focus commands
 
+void OnPrevTrack( bool shift );
+void OnNextTrack( bool shift );
 void OnCursorUp();
 void OnCursorDown();
 void OnFirstTrack();
@@ -153,12 +154,23 @@ void OnShiftUp();
 void OnShiftDown();
 void OnToggle();
 
+void HandleListSelection(Track *t, bool shift, bool ctrl, bool modifyState);
+
 void OnCursorLeft(const wxEvent * evt);
 void OnCursorRight(const wxEvent * evt);
 void OnSelExtendLeft(const wxEvent * evt);
 void OnSelExtendRight(const wxEvent * evt);
 void OnSelContractLeft(const wxEvent * evt);
 void OnSelContractRight(const wxEvent * evt);
+
+public:
+static double OnClipMove
+   (ViewInfo &viewInfo, Track *track,
+    TrackList &trackList, bool syncLocked, bool right);
+
+void DoClipLeftOrRight(bool right, bool keyUp );
+void OnClipLeft(const wxEvent* evt);
+void OnClipRight(const wxEvent* evt);
 
 void OnCursorShortJumpLeft();
 void OnCursorShortJumpRight();
@@ -210,7 +222,11 @@ void OnSaveAs();
 
 void OnCheckDependencies();
 
-void OnExport();
+void OnExport(const wxString & Format);
+void OnExportAudio();
+void OnExportMp3();
+void OnExportWav();
+void OnExportOgg();
 void OnExportSelection();
 void OnExportMultiple();
 void OnExportLabels();
@@ -229,6 +245,11 @@ public:
 void OnUndo();
 void OnRedo();
 
+private:
+static void FinishCopy(const Track *n, Track *dest);
+static void FinishCopy(const Track *n, Track::Holder &&dest, TrackList &list);
+
+public:
 void OnCut();
 void OnSplitCut();
 void OnCopy();
@@ -263,9 +284,20 @@ void OnSplitLabels();
 void OnJoinLabels();
 void OnDisjoinLabels();
 
+void OnSelectTimeAndTracks(bool bAllTime, bool bAllTracks);
+void OnSelectAllTime();
+void OnSelectAllTracks();
 void OnSelectAll();
+void OnSelectSomething();
 void OnSelectNone();
+private:
+int CountSelectedWaveTracks();
+int CountSelectedTracks();
+public:
 #ifdef EXPERIMENTAL_SPECTRAL_EDITING
+// For toggling of spectral seletion
+double mLastF0;
+double mLastF1;
 void OnToggleSpectralSelection();
 void DoNextPeakFrequency(bool up);
 void OnNextHigherPeakFrequency();
@@ -273,9 +305,27 @@ void OnNextLowerPeakFrequency();
 #endif
 void OnSelectCursorEnd();
 void OnSelectStartCursor();
+void OnSelectPrevClipBoundaryToCursor();
+void OnSelectCursorToNextClipBoundary();
+void OnSelectClipBoundary(bool next);
+typedef struct FoundClip {
+   const WaveTrack* waveTrack;
+   int trackNumber;
+   bool channel;
+   bool found;
+   double startTime;
+   double endTime;
+   int index;
+} FoundClip;
+FoundClip FindNextClip(const WaveTrack* wt, double t0, double t1);
+FoundClip FindPrevClip(const WaveTrack* wt, double t0, double t1);
+int FindClips(double t0, double t1, bool next, std::vector<FoundClip>& results);
+bool ChannelsHaveSameClipBoundaries(const WaveTrack* wt);
+void OnSelectPrevClip();
+void OnSelectNextClip();
+void OnSelectClip(bool next);
 void OnSelectCursorStoredCursor();
 void OnSelectSyncLockSel();
-void OnSelectAllTracks();
 
         // View Menu
 
@@ -293,10 +343,16 @@ void OnGoSelEnd();
 void OnExpandAllTracks();
 void OnCollapseAllTracks();
 
+void OnPanTracks(float PanValue);
+void OnPanLeft();
+void OnPanRight();
+void OnPanCenter();
+
 void OnMuteAllTracks();
 void OnUnMuteAllTracks();
 
 void OnShowClipping();
+void OnShowExtraMenus();
 
 void OnHistory();
 
@@ -330,7 +386,7 @@ void OnTogglePinnedHead();
 void OnTogglePlayRecording();
 void OnToggleSWPlaythrough();
 #ifdef EXPERIMENTAL_AUTOMATED_INPUT_LEVEL_ADJUSTMENT
-   void OnToogleAutomatedInputLevelAdjustment();
+   void OnToggleAutomatedInputLevelAdjustment();
 #endif
 void OnRescanDevices();
 
@@ -338,7 +394,12 @@ void OnRescanDevices();
 void OnImport();
 void OnImportLabels();
 void OnImportMIDI();
-void DoImportMIDI(const wxString &fileName);
+
+// return null on failure; if success, return the given project, or a NEW
+// one, if the given was null; create no NEW project if failure
+static AudacityProject *DoImportMIDI(
+   AudacityProject *pProject, const wxString &fileName);
+
 void OnImportRaw();
 
 void OnEditMetadata();
@@ -361,10 +422,30 @@ void OnCursorTrackStart();
 void OnCursorTrackEnd();
 void OnCursorSelStart();
 void OnCursorSelEnd();
+typedef struct FoundClipBoundary {
+   const WaveTrack* waveTrack;
+   int trackNumber;
+   bool channel;
+   int nFound;    // 0, 1, or 2
+   double time;
+   int index1;
+   bool clipStart1;
+   int index2;
+   bool clipStart2;
+} FoundClipBoundary;
+FoundClipBoundary FindNextClipBoundary(const WaveTrack* wt, double time);
+FoundClipBoundary FindPrevClipBoundary(const WaveTrack* wt, double time);
+double AdjustForFindingStartTimes(const std::vector<const WaveClip*>& clips, double time);
+double AdjustForFindingEndTimes(const std::vector<const WaveClip*>& clips, double time);
+int FindClipBoundaries(double time, bool next, std::vector<FoundClipBoundary>& results);
+void OnCursorNextClipBoundary();
+void OnCursorPrevClipBoundary();
+void OnCursorClipBoundary(bool next);
+wxString ClipBoundaryMessage(const std::vector<FoundClipBoundary>& results);
 
 void OnAlignNoSync(int index);
 void OnAlign(int index);
-void OnAlignMoveSel(int index);
+//void OnAlignMoveSel(int index);
 void HandleAlign(int index, bool moveSel);
 size_t mAlignLabelsCount;
 
@@ -379,6 +460,7 @@ void OnNewLabelTrack();
 void OnNewTimeTrack();
 void OnTimerRecord();
 void OnRemoveTracks();
+void OnMoveSelectionWithTracks();
 void OnSyncLock();
 void OnAddLabel();
 void OnAddLabelPlaying();
@@ -407,9 +489,12 @@ void OnApplyChain();
 void OnEditChains();
 void OnStereoToMono(int index);
 void OnManagePluginsMenu(EffectType Type);
+void RebuildAllMenuBars();
 void OnManageGenerators();
 void OnManageEffects();
 void OnManageAnalyzers();
+
+
 
         // Help Menu
 
@@ -426,6 +511,9 @@ void OnCrashReport();
 #endif
 void OnScreenshot();
 void OnAudioDeviceInfo();
+#ifdef EXPERIMENTAL_MIDI_OUT
+void OnMidiDeviceInfo();
+#endif
 
        //
 

@@ -23,7 +23,6 @@
 #include <wx/dnd.h>
 
 #include "../Audacity.h"
-#include "../AudacityApp.h"
 #include "../Prefs.h"
 #include "../ShuttleGui.h"
 
@@ -186,7 +185,7 @@ void ExtImportPrefs::PopulateOrExchange(ShuttleGui & S)
    SetMinSize(GetSize());
 }
 
-bool ExtImportPrefs::Apply()
+bool ExtImportPrefs::Commit()
 {
    ShuttleGui S(this, eIsSavingToPrefs);
    PopulateOrExchange(S);
@@ -667,6 +666,11 @@ void ExtImportPrefs::OnRuleTableCellClick (wxGridEvent& event)
    }
 
    event.Skip();
+}
+
+wxString ExtImportPrefs::HelpPageName()
+{
+   return "Extended_Import_Preferences";
 }
 
 ExtImportPrefsDropTarget::ExtImportPrefsDropTarget(wxDataObject *dataObject)

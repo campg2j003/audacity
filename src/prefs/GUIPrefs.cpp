@@ -24,12 +24,16 @@
 
 #include "../AudacityApp.h"
 #include "../Languages.h"
+#include "../Theme.h"
 #include "../Prefs.h"
 #include "../ShuttleGui.h"
 
 #include "GUISettings.h"
 
 #include "../Experimental.h"
+
+#include "ThemePrefs.h"
+#include "../AColor.h"
 
 GUIPrefs::GUIPrefs(wxWindow * parent)
 :  PrefsPanel(parent, _("Interface"))
@@ -81,6 +85,18 @@ void GUIPrefs::Populate()
    mHtmlHelpChoices.Add(_("Local"));
    mHtmlHelpChoices.Add(_("From Internet"));
 
+   mThemeCodes.Add( wxT("classic") );
+   mThemeCodes.Add( wxT("light") );
+   mThemeCodes.Add( wxT("dark") );
+   mThemeCodes.Add( wxT("high-contrast") );
+   mThemeCodes.Add( wxT("custom") );
+
+   mThemeChoices.Add( _("Classic") );
+   mThemeChoices.Add( _("Light") );
+   mThemeChoices.Add( _("Dark") );
+   mThemeChoices.Add( _("High Contrast") );
+   mThemeChoices.Add( _("Custom") );
+
    GetRangeChoices(&mRangeChoices, &mRangeCodes);
 
 #if 0
@@ -104,24 +120,15 @@ void GUIPrefs::PopulateOrExchange(ShuttleGui & S)
 
    S.StartStatic(_("Display"));
    {
-      S.TieCheckBox(_("&Ergonomic order of Transport Toolbar buttons"),
-                    wxT("/GUI/ErgonomicTransportButtons"),
-                    true);
-      S.TieCheckBox(_("S&how 'How to Get Help' dialog box at program start up"),
-                    wxT("/GUI/ShowSplashScreen"),
-                    true);
-
-      S.AddSpace(10);
-
       S.StartMultiColumn(2);
       {
+
+#ifdef EXPERIMENTAL_DA
+         const wxString defaultTheme = wxT("dark");
+#else
+         const wxString defaultTheme = wxT("light");
+#endif
          const wxString defaultRange = wxString::Format(wxT("%d"), ENV_DB_RANGE);
-         S.TieChoice(_("Meter dB &range:"),
-                     ENV_DB_KEY,
-                     defaultRange,
-                     mRangeChoices,
-                     mRangeCodes);
-         S.SetSizeHints(mRangeChoices);
 
          S.TieChoice(_("&Language:"),
                      wxT("/Locale/Language"),
@@ -136,8 +143,47 @@ void GUIPrefs::PopulateOrExchange(ShuttleGui & S)
                      mHtmlHelpChoices,
                      mHtmlHelpCodes);
          S.SetSizeHints(mHtmlHelpChoices);
+
+         S.TieChoice(_("Th&eme:"),
+                     wxT("/GUI/Theme"),
+                     defaultTheme,
+                     mThemeChoices,
+                     mThemeCodes);
+         S.SetSizeHints(mThemeChoices);
+
+         S.TieChoice(_("Meter dB &range:"),
+                     ENV_DB_KEY,
+                     defaultRange,
+                     mRangeChoices,
+                     mRangeCodes);
+         S.SetSizeHints(mRangeChoices);
       }
       S.EndMultiColumn();
+//      S.AddSpace(10);
+// JKC: This is a silly preference.  Kept here as a reminder that we may
+// later want to have configurable button order.
+//      S.TieCheckBox(_("&Ergonomic order of Transport Toolbar buttons"),
+//                    wxT("/GUI/ErgonomicTransportButtons"),
+//                    true);
+
+   }
+   S.EndStatic();
+
+   S.StartStatic(_("Show"));
+   {
+      S.TieCheckBox(_("'How to Get &Help' at launch"),
+                    wxT("/GUI/ShowSplashScreen"),
+                    true);
+      S.TieCheckBox(_("E&xtra menus"),
+                    wxT("/GUI/ShowExtraMenus"),
+                    false);
+#ifdef EXPERIMENTAL_THEME_PREFS
+      // We do not want to make this option mainstream.  It's a 
+      // convenience for developers.
+      S.TieCheckBox(_("Show alternative &styling (Mac vs PC)"),
+                    wxT("/GUI/ShowMac"),
+                    false);
+#endif
    }
    S.EndStatic();
 
@@ -146,10 +192,12 @@ void GUIPrefs::PopulateOrExchange(ShuttleGui & S)
       S.TieCheckBox(_("&Beep on completion of longer activities"),
                     wxT("/GUI/BeepOnCompletion"),
                     false);
-      S.TieCheckBox(_("Re&tain labels if selection snaps to a label edge"),
+      S.TieCheckBox(_("Re&tain labels if selection snaps to a label"),
                     wxT("/GUI/RetainLabels"),
                     false);
-
+      S.TieCheckBox(_("B&lend system and Audacity theme"),
+                    wxT("/GUI/BlendThemes"),
+                    true);
 #ifdef EXPERIMENTAL_OUTPUT_DISPLAY
       S.TieCheckBox(_("&Display a mono channel as virtual stereo"),
                     wxT("/GUI/MonoAsVirtualStereo"),
@@ -159,7 +207,7 @@ void GUIPrefs::PopulateOrExchange(ShuttleGui & S)
    S.EndStatic();
 }
 
-bool GUIPrefs::Apply()
+bool GUIPrefs::Commit()
 {
    ShuttleGui S(this, eIsSavingToPrefs);
    PopulateOrExchange(S);
@@ -167,13 +215,19 @@ bool GUIPrefs::Apply()
    // If language has changed, we want to change it now, not on the next reboot.
    wxString lang = gPrefs->Read(wxT("/Locale/Language"), wxT(""));
    wxString usedLang = wxGetApp().InitLang(lang);
-   if (lang != usedLang) {
-      // lang was not usable.  We got overridden.
+   // Bug 1523: Previously didn't check no-language (=System Language)
+   if (!(lang.empty()) && (lang != usedLang)) {
+      // lang was not usable and is not system language.  We got overridden.
       gPrefs->Write(wxT("/Locale/Language"), usedLang);
       gPrefs->Flush();
    }
 
    return true;
+}
+
+wxString GUIPrefs::HelpPageName()
+{
+   return "Interface_Preferences";
 }
 
 PrefsPanel *GUIPrefsFactory::Create(wxWindow *parent)

@@ -12,8 +12,6 @@
 #include "../Audacity.h"
 #include "Contrast.h"
 
-#include "../AudacityApp.h"
-
 #include "../WaveTrack.h"
 #include "../Prefs.h"
 #include "../Project.h"
@@ -22,7 +20,6 @@
 #include "../widgets/LinkingHtmlWindow.h"
 #include "../widgets/HelpSystem.h"
 #include "../widgets/NumericTextCtrl.h"
-#include "../lib-src/FileDialog/FileDialog.h"
 
 #include <cmath>
 #include <limits>
@@ -32,6 +29,7 @@
 #define finite(x) _finite(x)
 #endif
 
+#include <wx/filedlg.h>
 #include <wx/valtext.h>
 #include <wx/log.h>
 
@@ -86,7 +84,8 @@ bool ContrastDialog::GetDB(float &dB)
          return false;
       }
 
-      ((WaveTrack *)t)->GetRMS(&rms, mT0, mT1);
+      // Don't throw in this analysis dialog
+      rms = ((WaveTrack *)t)->GetRMS(mT0, mT1, false);
       meanSq += rms * rms;
       t = (WaveTrack *) iter.Next();
    }
@@ -178,6 +177,7 @@ ContrastDialog::ContrastDialog(wxWindow * parent, wxWindowID id,
    S.SetBorder(5);
    S.StartHorizontalLay(wxCENTER, false);
    {
+      /* i18n-hint: RMS abbreviates root mean square, a certain averaging method */
       S.AddTitle(_("Contrast Analyzer, for measuring RMS volume differences between two selections of audio."));
    }
    S.EndHorizontalLay();
@@ -363,6 +363,67 @@ void ContrastDialog::OnGetBackground(wxCommandEvent & /*event*/)
    results();
 }
 
+namespace {
+   // PRL:  I gathered formatting into these functions, and eliminated some
+   // repetitions, and removed the redundant word "Average" as applied to RMS.
+   // Should these variations in formats be collapsed further?
+
+   // Pass nullptr when value is not yet defined
+   wxString FormatRMSMessage( float *pValue )
+   {
+
+      /* i18n-hint: RMS abbreviates root mean square, a certain averaging method */
+      wxString format0{ _("RMS = %s.") };
+
+      /* i18n-hint: dB abbreviates decibels */
+      wxString format1{ _("%s dB") };
+
+      wxString value;
+
+      if ( pValue )
+         if( fabs( *pValue ) != std::numeric_limits<float>::infinity() ) {
+            auto number = wxString::Format( _("%.2f"), *pValue );
+            value = wxString::Format( format1, number );
+         }
+         else
+            value = _("zero");
+      else
+         value = wxString::Format( format1, "" );
+
+      return wxString::Format( format0, value );
+   }
+
+   wxString FormatDifference( float diffdB )
+   {
+      if( diffdB != diffdB )   // test for NaN, reliant on IEEE implementation
+         return _("indeterminate");
+      else {
+         if( diffdB != std::numeric_limits<float>::infinity() )
+            /* i18n-hint: dB abbreviates decibels */
+            /* i18n-hint: RMS abbreviates root mean square, a certain averaging method */
+            return wxString::Format(_("%.2f dB RMS"), diffdB);
+         else
+            /* i18n-hint: dB abbreviates decibels */
+            return wxString::Format(_("Infinite dB difference"));
+      }
+   }
+
+   wxString FormatDifferenceForExport( float diffdB )
+   {
+      if( diffdB != diffdB ) //test for NaN, reliant on IEEE implementation
+         return _("Difference is indeterminate.");
+      else
+         if( fabs(diffdB) != std::numeric_limits<float>::infinity() )
+            /* i18n-hint: dB abbreviates decibels */
+            /* i18n-hint: RMS abbreviates root mean square, a certain averaging method */
+            return wxString::Format(_("Difference = %.2f RMS dB."), diffdB );
+         else
+            /* i18n-hint: dB abbreviates decibels */
+            /* i18n-hint: RMS abbreviates root mean square, a certain averaging method */
+            return _("Difference = infinite RMS dB.");
+   }
+}
+
 void ContrastDialog::results()
 {
    mPassFailText->SetName(wxT(""));
@@ -382,25 +443,17 @@ void ContrastDialog::results()
          mPassFailText->ChangeValue(_("Background higher than foreground"));
       }
       else if(diffdB > WCAG2_PASS) {
+         /* i18n-hint: WCAG abbreviates Web Content Accessibility Guidelines */
          mPassFailText->ChangeValue(_("WCAG2 Pass"));
       }
       else {
+         /* i18n-hint: WCAG abbreviates Web Content Accessibility Guidelines */
          mPassFailText->ChangeValue(_("WCAG2 Fail"));
       }
 
       /* i18n-hint: i.e. difference in loudness at the moment. */
       mDiffText->SetName(_("Current difference"));
-      if( diffdB != diffdB ) {   // test for NaN, reliant on IEEE implementation
-         mDiffText->ChangeValue(wxString::Format(_("indeterminate")));
-      }
-      else {
-         if( diffdB != std::numeric_limits<float>::infinity() ) {
-            mDiffText->ChangeValue(wxString::Format(_("%.2f dB Average RMS"), diffdB));
-         }
-         else {
-            mDiffText->ChangeValue(wxString::Format(_("Infinite dB difference")));
-         }
-      }
+      mDiffText->ChangeValue( FormatDifference( diffdB ) );
    }
 
    if (mForegroundIsDefined) {
@@ -436,7 +489,8 @@ void ContrastDialog::OnExport(wxCommandEvent & WXUNUSED(event))
    AudacityProject * project = GetActiveProject();
    wxString fName = wxT("contrast.txt");
 
-   fName = FileSelector(_("Export Contrast Result As:"),
+   fName = FileNames::SelectFile(FileNames::Operation::Export,
+                        _("Export Contrast Result As:"),
                         wxEmptyString,
                         fName,
                         wxT("txt"),
@@ -460,6 +514,7 @@ void ContrastDialog::OnExport(wxCommandEvent & WXUNUSED(event))
    }
 
    f.AddLine(wxT("==================================="));
+   /* i18n-hint: WCAG abbreviates Web Content Accessibility Guidelines */
    f.AddLine(_("WCAG 2.0 Success Criteria 1.4.7 Contrast Results"));
    f.AddLine(wxT(""));
    f.AddLine(wxString::Format(_("Filename = %s."), project->GetFileName().c_str() ));
@@ -475,13 +530,7 @@ void ContrastDialog::OnExport(wxCommandEvent & WXUNUSED(event))
    m = (int)((t - h*3600)/60);
    s = t - h*3600.0 - m*60.0;
    f.AddLine(wxString::Format(_("Time ended = %2d hour(s), %2d minute(s), %.2f seconds."), h, m, s ));
-   if(mForegroundIsDefined)
-      if( fabs(foregrounddB) != std::numeric_limits<float>::infinity() )
-         f.AddLine(wxString::Format(_("Average RMS = %.2f dB."), foregrounddB ));
-      else
-         f.AddLine(wxString::Format(_("Average RMS = zero.") ));
-   else
-      f.AddLine(wxString::Format(_("Average RMS =  dB.")));
+   f.AddLine( FormatRMSMessage( mForegroundIsDefined ? &foregrounddB : nullptr ) );
    f.AddLine(wxT(""));
    f.AddLine(_("Background"));
    t = (float)mBackgroundStartT->GetValue();
@@ -494,23 +543,12 @@ void ContrastDialog::OnExport(wxCommandEvent & WXUNUSED(event))
    m = (int)((t - h*3600)/60);
    s = t - h*3600.0 - m*60.0;
    f.AddLine(wxString::Format(_("Time ended = %2d hour(s), %2d minute(s), %.2f seconds."), h, m, s ));
-   if(mBackgroundIsDefined)
-      if( fabs(backgrounddB) != std::numeric_limits<float>::infinity() )
-         f.AddLine(wxString::Format(_("Average RMS = %.2f dB."), backgrounddB ));
-      else
-         f.AddLine(wxString::Format(_("Average RMS = zero.") ));
-   else
-      f.AddLine(wxString::Format(_("Average RMS =  dB.")));
+   f.AddLine( FormatRMSMessage( mBackgroundIsDefined ? &backgrounddB : nullptr ) );
    f.AddLine(wxT(""));
    f.AddLine(_("Results"));
    float diffdB = foregrounddB - backgrounddB;
-   if( diffdB != diffdB ) //test for NaN, reliant on IEEE implementation
-      f.AddLine(wxString::Format(_("Difference is indeterminate.") ));
-   else
-      if( fabs(diffdB) != std::numeric_limits<float>::infinity() )
-         f.AddLine(wxString::Format(_("Difference = %.2f Average RMS dB."), diffdB ));
-      else
-         f.AddLine(wxString::Format(_("Difference = infinite Average RMS dB.")));
+
+   f.AddLine( FormatDifferenceForExport( diffdB ) );
    if( diffdB > 20. )
       f.AddLine(_("Success Criteria 1.4.7 of WCAG 2.0: Pass"));
    else

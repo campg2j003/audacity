@@ -24,6 +24,7 @@
 #include "KeyView.h"
 
 #include <wx/arrimpl.cpp>
+#include <wx/dc.h>
 
 // Various drawing constants
 #define KV_BITMAP_SIZE 16
@@ -45,6 +46,9 @@ BEGIN_EVENT_TABLE(KeyView, wxVListBox)
    EVT_SIZE(KeyView::OnSize)
    EVT_SCROLLWIN(KeyView::OnScroll)
 END_EVENT_TABLE();
+
+wxString    KeyView::CommandTranslated="Command";
+
 
 // ============================================================================
 // KeyView class
@@ -350,6 +354,15 @@ KeyView::SetView(ViewByType type)
       SelectNode(index);
    }
 
+#if 0
+   // JKC: Optional code to list commants and shortcuts to debug console.
+   int nLines = mLines.GetCount();
+   int flags = 8;
+   for(int i=0;i<nLines;i++){
+      wxLogDebug("T.Add( %2i, %2i,  0, \"%s¬%s\" );", mLines[i]->depth-1, flags, mLines[i]->label,mLines[i]->key ); 
+   }
+#endif
+
    return;
 }
 
@@ -518,7 +531,9 @@ KeyView::RefreshBindings(const wxArrayString & names,
                          const wxArrayString & categories,
                          const wxArrayString & prefixes,
                          const wxArrayString & labels,
-                         const wxArrayString & keys)
+                         const wxArrayString & keys,
+                         bool bSort
+                         )
 {
    bool firsttime = mNodes.GetCount() == 0;
 
@@ -591,6 +606,7 @@ KeyView::RefreshBindings(const wxArrayString & names,
             node.iscat = true;
             node.isparent = true;
             node.depth = depth++;
+            node.isopen = true;
 
             // Add it to the tree
             mNodes.Add(node);
@@ -630,6 +646,7 @@ KeyView::RefreshBindings(const wxArrayString & names,
             node.ispfx = true;
             node.isparent = true;
             node.depth = depth++;
+            node.isopen = true;
 
             // Add it to the tree
             mNodes.Add(node);
@@ -711,10 +728,10 @@ KeyView::RefreshBindings(const wxArrayString & names,
    UpdateHScroll();
 
    // Refresh the view lines
-   RefreshLines();
+   RefreshLines(bSort);
 
-   // Set the selected node if this was the first time through
-   if (firsttime)
+   // Set the selected node if we've just reprepared the list and nothing was selected.
+   if ((GetSelection()==wxNOT_FOUND) && bSort )
    {
       SelectNode(LineToIndex(0));
    }
@@ -724,7 +741,7 @@ KeyView::RefreshBindings(const wxArrayString & names,
 // Refresh the list of lines within the current view
 //
 void
-KeyView::RefreshLines()
+KeyView::RefreshLines(bool bSort)
 {
    int cnt = (int) mNodes.GetCount();
    int linecnt = 0;
@@ -906,20 +923,33 @@ KeyView::RefreshLines()
       }
    }
 
-   // Sort list based on type
-   switch (mViewType)
+   // Sorting is costly.  If bSort is false, we do not have to sort.
+   // bSort false means we know that the list will be updated again before
+   // the user needs to see it.
+   if( bSort )
    {
-      case ViewByTree:
-         mLines.Sort(CmpKeyNodeByTree);
-      break;
+      //To see how many lines are being sorted (and how often).
+      //wxLogDebug("Sorting %i lines for type %i", mLines.GetCount(), mViewType);
 
-      case ViewByName:
-         mLines.Sort(CmpKeyNodeByName);
-      break;
+      // Speed up the comparison function used in sorting
+      // by only translating this string once.
+      CommandTranslated = _("Command");
 
-      case ViewByKey:
-         mLines.Sort(CmpKeyNodeByKey);
-      break;
+      // Sort list based on type
+      switch (mViewType)
+      {
+         case ViewByTree:
+            mLines.Sort(CmpKeyNodeByTree);
+         break;
+
+         case ViewByName:
+            mLines.Sort(CmpKeyNodeByName);
+         break;
+
+         case ViewByKey:
+            mLines.Sort(CmpKeyNodeByKey);
+         break;
+      }
    }
 
    // Now, reassign the line numbers
@@ -954,7 +984,8 @@ KeyView::RefreshLines()
 
 #if wxUSE_ACCESSIBILITY
    // Let accessibility know that the list has changed
-   mAx->ListUpdated();
+   if( bSort )
+      mAx->ListUpdated();
 #endif
 }
 
@@ -1049,15 +1080,22 @@ KeyView::OnDrawBackground(wxDC & dc, const wxRect & rect, size_t line) const
       if (FindFocus() == this)
       {
          // Focused lines get highlighted background
+         dc.SetPen(*wxTRANSPARENT_PEN);
          dc.SetBrush(wxBrush(wxSystemSettings::GetColour(wxSYS_COLOUR_HIGHLIGHT)));
-         AColor::DrawFocus(dc, r);
          dc.DrawRectangle(r);
+
+         // and they also get a dotted focus rect.  This could just be left out.
+         // The focus rect does very little for us, as it is the same size as the 
+         // rectangle itself.  Consequently for themes that have black text it
+         // disappears.  But on HiContrast you do get a dotted green border which
+         // may have some utility.
+         AColor::DrawFocus(dc, r);
       }
       else
       {
          // Non focused lines get a light background
-         dc.SetBrush(wxBrush(wxSystemSettings::GetColour(wxSYS_COLOUR_BTNFACE)));
          dc.SetPen(*wxTRANSPARENT_PEN);
+         dc.SetBrush(wxBrush(wxSystemSettings::GetColour(wxSYS_COLOUR_BTNFACE)));
          dc.DrawRectangle(r);
       }
    }
@@ -1534,48 +1572,30 @@ KeyView::CmpKeyNodeByTree(KeyNode ***n1, KeyNode ***n2)
 {
    KeyNode *t1 = (**n1);
    KeyNode *t2 = (**n2);
-   wxString k1 = t1->label;
-   wxString k2 = t2->label;
+
+   unsigned int k1UInt= 0xffffffff;
+   unsigned int k2UInt= 0xffffffff;
 
    // This is a "command" node if its category is "Command"
    // and it is a child of the "Command" category.  This latter
    // test ensures that the "Command" parent will be handled
    // as a "menu" node and remain at the bottom of the list.
-   if (t1->category == _("Command") && !t1->isparent)
-   {
-      // A "command" node, so prepend the highest hex value
-      k1.Printf(wxT("ffffffff%s"), t1->label.c_str());
-   }
-   else
-   {
-      // A "menu" node, so prepend the line number
-      k1.Printf(wxT("%08x%s"), (unsigned int) t1->line, t1->label.c_str());
-   }
+   if (t1->category != CommandTranslated || t1->isparent)
+      k1UInt = (unsigned int) t1->line;
 
    // See above for explanation
-   if (t2->category == _("Command") && !t2->isparent)
-   {
-      // A "command" node, so prepend the highest hex value
-      k2.Printf(wxT("ffffffff%s"), t2->label.c_str());
-   }
-   else
-   {
-      // A "menu" node, so prepend the line number
-      k2.Printf(wxT("%08x%s"), (unsigned int) t2->line, t2->label.c_str());
-   }
+   if (t2->category != CommandTranslated || t2->isparent)
+      k2UInt = (unsigned int) t2->line;
 
-   // See wxWidgets documentation for explanation of comparison results.
-   // These will produce an ascending order.
-   if (k1 < k2)
-   {
+   if( k1UInt < k2UInt ) 
       return -1;
-   }
+   if( k1UInt > k2UInt )
+      return +1;
 
-   if (k1 > k2)
-   {
+   if( t1->label < t2->label )
+      return -1;
+   if( t1->label > t2->label )
       return 1;
-   }
-
    return 0;
 }
 

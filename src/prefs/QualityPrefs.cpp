@@ -210,7 +210,7 @@ void QualityPrefs::OnSampleRateChoice(wxCommandEvent & WXUNUSED(e))
    mOtherSampleRate->Enable(sel == (int)mSampleRates->GetCount() - 1);
 }
 
-bool QualityPrefs::Apply()
+bool QualityPrefs::Commit()
 {
    ShuttleGui S(this, eIsSavingToPrefs);
    PopulateOrExchange(S);
@@ -226,6 +226,11 @@ bool QualityPrefs::Apply()
    InitDitherers();
 
    return true;
+}
+
+wxString QualityPrefs::HelpPageName()
+{
+   return "Quality_Preferences";
 }
 
 PrefsPanel *QualityPrefsFactory::Create(wxWindow *parent)

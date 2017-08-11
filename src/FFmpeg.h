@@ -140,7 +140,6 @@ extern "C" {
 #include <wx/msgdlg.h>   // for wxMessageBox
 #include <wx/utils.h>
 #include "widgets/LinkingHtmlWindow.h"
-#include "FileDialog.h"
 #include "ShuttleGui.h"
 #include "Prefs.h"
 #include <wx/checkbox.h>
@@ -982,13 +981,13 @@ struct streamContext
    int                  m_frameValid{};                    // is m_decodedVideoFrame/m_decodedAudioSamples valid?
    AVMallocHolder<uint8_t> m_decodedAudioSamples;           // decoded audio samples stored here
    unsigned int         m_decodedAudioSamplesSiz{};        // current size of m_decodedAudioSamples
-   int                  m_decodedAudioSamplesValidSiz{};   // # valid bytes in m_decodedAudioSamples
+   size_t               m_decodedAudioSamplesValidSiz{};   // # valid bytes in m_decodedAudioSamples
    int                  m_initialchannels{};               // number of channels allocated when we begin the importing. Assumes that number of channels doesn't change on the fly.
 
-   int                  m_samplesize{};                    // input sample size in bytes
+   size_t               m_samplesize{};                    // input sample size in bytes
    AVSampleFormat       m_samplefmt{ AV_SAMPLE_FMT_NONE  }; // input sample format
 
-   int                  m_osamplesize{};                   // output sample size in bytes
+   size_t               m_osamplesize{};                   // output sample size in bytes
    sampleFormat         m_osamplefmt{ floatSample };                    // output sample format
 
    streamContext() { memset(this, 0, sizeof(*this)); }

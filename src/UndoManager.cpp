@@ -41,7 +41,7 @@ WX_DECLARE_HASH_SET(ConstBlockFilePtr, wxPointerHash, wxPointerEqual, Set );
 
 struct UndoStackElem {
 
-   UndoStackElem(std::unique_ptr<TrackList> &&tracks_,
+   UndoStackElem(std::shared_ptr<TrackList> &&tracks_,
       const wxString &description_,
       const wxString &shortDescription_,
       const SelectedRegion &selectedRegion_,
@@ -61,7 +61,6 @@ UndoManager::UndoManager()
 {
    current = -1;
    saved = -1;
-   consolidationCount = 0;
    ResetODChangesFlag();
 }
 
@@ -128,8 +127,8 @@ void UndoManager::CalculateSpaceUsage()
    // contains it.
 
    // Why the last and not the first? Because the user of the History dialog
-   // may delete undo states, oldest first.  To reclaim disk space you must
-   // delete all states containing the block file.  So the block file's
+   // may DELETE undo states, oldest first.  To reclaim disk space you must
+   // DELETE all states containing the block file.  So the block file's
    // contribution to space usage should be counted only in that latest state.
 
    for (size_t nn = stack.size(); nn--;)
@@ -232,7 +231,7 @@ void UndoManager::ModifyState(const TrackList * l,
    stack[current]->state.tracks.reset();
 
    // Duplicate
-   auto tracksCopy = std::make_unique<TrackList>();
+   auto tracksCopy = TrackList::Create();
    TrackListConstIterator iter(l);
    const Track *t = iter.First();
    while (t) {
@@ -257,10 +256,9 @@ void UndoManager::PushState(const TrackList * l,
 {
    unsigned int i;
 
-   // If consolidate is set to true, group up to 3 identical operations.
-   if (((flags & UndoPush::CONSOLIDATE) != UndoPush::MINIMAL) && lastAction == longDescription &&
-       consolidationCount < 2) {
-      consolidationCount++;
+   if ( ((flags & UndoPush::CONSOLIDATE) != UndoPush::MINIMAL) &&
+       lastAction == longDescription &&
+       mayConsolidate ) {
       ModifyState(l, selectedRegion, tags);
       // MB: If the "saved" state was modified by ModifyState, reset
       //  it so that UnsavedChanges returns true.
@@ -270,14 +268,14 @@ void UndoManager::PushState(const TrackList * l,
       return;
    }
 
-   consolidationCount = 0;
+   mayConsolidate = true;
 
    i = current + 1;
    while (i < stack.size()) {
       RemoveStateAt(i);
    }
 
-   auto tracksCopy = std::make_unique<TrackList>();
+   auto tracksCopy = TrackList::Create();
    TrackListConstIterator iter(l);
    const Track *t = iter.First();
    while (t) {
@@ -319,7 +317,7 @@ const UndoState &UndoManager::SetStateTo
    }
 
    lastAction = wxT("");
-   consolidationCount = 0;
+   mayConsolidate = false;
 
    return stack[current]->state;
 }
@@ -333,7 +331,7 @@ const UndoState &UndoManager::Undo(SelectedRegion *selectedRegion)
    *selectedRegion = stack[current]->state.selectedRegion;
 
    lastAction = wxT("");
-   consolidationCount = 0;
+   mayConsolidate = false;
 
    return stack[current]->state;
 }
@@ -360,7 +358,7 @@ const UndoState &UndoManager::Redo(SelectedRegion *selectedRegion)
    */
 
    lastAction = wxT("");
-   consolidationCount = 0;
+   mayConsolidate = false;
 
    return stack[current]->state;
 }

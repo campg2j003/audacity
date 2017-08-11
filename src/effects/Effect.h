@@ -18,10 +18,12 @@
 
 #include "../MemoryX.h"
 #include <wx/bmpbuttn.h>
+#include <wx/defs.h>
 #include <wx/dynarray.h>
 #include <wx/intl.h>
 #include <wx/string.h>
 #include <wx/tglbtn.h>
+#include <wx/event.h> // for idle event.
 
 class wxCheckBox;
 class wxChoice;
@@ -32,6 +34,7 @@ class wxWindow;
 #include "audacity/EffectInterface.h"
 
 #include "../Experimental.h"
+#include "../SampleFormat.h"
 #include "../SelectedRegion.h"
 #include "../Shuttle.h"
 #include "../Internat.h"
@@ -46,7 +49,6 @@ class ShuttleGui;
 class AudacityProject;
 class LabelTrack;
 class SelectedRegion;
-class TimeWarper;
 class EffectUIHost;
 class Track;
 class TrackList;
@@ -226,6 +228,11 @@ class AUDACITY_DLL_API Effect /* not final */ : public wxEvtHandler,
    virtual bool HasFactoryDefaults();
    virtual wxString GetPreset(wxWindow * parent, const wxString & parms);
 
+   // Name of page in the Audacity alpha manual
+   virtual wxString ManualPage();
+   // Fully qualified local help file name
+   virtual wxString HelpPage();
+
    virtual bool IsBatchProcessing();
    virtual void SetBatchProcessing(bool start);
 
@@ -241,6 +248,9 @@ class AUDACITY_DLL_API Effect /* not final */ : public wxEvtHandler,
                  TrackFactory *factory, SelectedRegion *selectedRegion,
                  bool shouldPrompt = true);
 
+   bool Delegate( Effect &delegate,
+      wxWindow *parent, SelectedRegion *selectedRegion, bool shouldPrompt);
+
    // Realtime Effect Processing
    /* not virtual */ bool RealtimeAddProcessor(int group, unsigned chans, float rate);
    /* not virtual */ size_t RealtimeProcess(int group,
@@ -251,7 +261,6 @@ class AUDACITY_DLL_API Effect /* not final */ : public wxEvtHandler,
    /* not virtual */ bool IsRealtimeActive();
 
    virtual bool IsHidden();
-
 //
 // protected virtual methods
 //
@@ -284,7 +293,9 @@ protected:
    virtual bool InitPass2();
    virtual int GetPass();
 
-   // clean up any temporary memory
+   // clean up any temporary memory, needed only per invocation of the
+   // effect, after either successful or failed or exception-aborted processing.
+   // Invoked inside a "finally" block so it must be no-throw.
    virtual void End();
 
    // Most effects just use the previewLength, but time-stretching/compressing
@@ -324,10 +335,8 @@ protected:
    int GetNumWaveGroups() { return mNumGroups; }
 
    // Calculates the start time and selection length in samples
-   void GetSamples(WaveTrack *track, sampleCount *start, sampleCount *len);
-
-   void SetTimeWarper(std::unique_ptr<TimeWarper> &&warper);
-   TimeWarper *GetTimeWarper();
+   void GetSamples(
+      const WaveTrack *track, sampleCount *start, sampleCount *len);
 
    // Previewing linear effect can be optimised by pre-mixing. However this
    // should not be used for non-linear effects such as dynamic processors
@@ -407,7 +416,7 @@ protected:
    private:
       Effect *mpEffect{};
       LabelTrack *mpTrack{};
-      movable_ptr<Track> mpOrigTrack{};
+      std::shared_ptr<Track> mpOrigTrack{};
    };
 
    // Set name to given value if that is not empty, else use default name
@@ -429,20 +438,20 @@ protected:
 // may be needed by any particular subclass of Effect.
 //
 protected:
+
    ProgressDialog *mProgress; // Temporary pointer, NOT deleted in destructor.
    double         mProjectRate; // Sample rate of the project - NEW tracks should
                                // be created with this rate...
    double         mSampleRate;
    TrackFactory   *mFactory;
-   TrackList      *mTracks;      // the complete list of all tracks
-   std::unique_ptr<TrackList> mOutputTracks; // used only if CopyInputTracks() is called.
+   TrackList *inputTracks() const { return mTracks; }
+   std::shared_ptr<TrackList> mOutputTracks; // used only if CopyInputTracks() is called.
    double         mT0;
    double         mT1;
 #ifdef EXPERIMENTAL_SPECTRAL_EDITING
    double         mF0;
    double         mF1;
 #endif
-   std::unique_ptr<TimeWarper> mWarper;
    wxArrayString  mPresetNames;
    wxArrayString  mPresetValues;
    int            mPass;
@@ -470,18 +479,21 @@ protected:
                      WaveTrack *right,
                      sampleCount leftStart,
                      sampleCount rightStart,
-                     sampleCount len);
- 
+                     sampleCount len,
+                     FloatBuffers &inBuffer,
+                     FloatBuffers &outBuffer,
+                     ArrayOf< float * > &inBufPos,
+                     ArrayOf< float *> &outBufPos);
+
  //
  // private data
  //
  // Used only by the base Effect class
  //
 private:
-   wxWindow *mParent;
+   TrackList *mTracks; // the complete list of all tracks
 
    bool mIsBatch;
-
    bool mIsLinearEffect;
    bool mPreviewWithNotSelected;
    bool mPreviewFullSelection;
@@ -502,13 +514,8 @@ private:
 
    // For client driver
    EffectClientInterface *mClient;
-   unsigned mNumAudioIn;
-   unsigned mNumAudioOut;
-
-   float **mInBuffer;
-   float **mOutBuffer;
-   float **mInBufPos;
-   float **mOutBufPos;
+   size_t mNumAudioIn;
+   size_t mNumAudioOut;
 
    size_t mBufferSize;
    size_t mBlockSize;
@@ -565,6 +572,7 @@ private:
    int mAdditionalButtons;
 
    DECLARE_EVENT_TABLE()
+   wxDECLARE_NO_COPY_CLASS(EffectDialog);
 };
 
 //
@@ -593,6 +601,7 @@ private:
    void OnApply(wxCommandEvent & evt);
    void DoCancel();
    void OnCancel(wxCommandEvent & evt);
+   void OnHelp(wxCommandEvent & evt);
    void OnDebug(wxCommandEvent & evt);
    void OnMenu(wxCommandEvent & evt);
    void OnEnable(wxCommandEvent & evt);
@@ -616,6 +625,7 @@ private:
 
    void InitializeRealtime();
    void CleanupRealtime();
+   void Resume();
 
 private:
    AudacityProject *mProject;
@@ -655,6 +665,7 @@ private:
    double mPlayPos;
 
    bool mDismissed{};
+   bool mNeedsResume{};
 
    DECLARE_EVENT_TABLE()
 };

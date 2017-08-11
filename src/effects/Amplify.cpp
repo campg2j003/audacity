@@ -90,6 +90,11 @@ wxString EffectAmplify::GetDescription()
    return XO("Increases or decreases the volume of the audio you have selected");
 }
 
+wxString EffectAmplify::ManualPage()
+{
+   return wxT("Amplify");
+}
+
 // EffectIdentInterface implementation
 
 EffectType EffectAmplify::GetType()
@@ -160,12 +165,12 @@ bool EffectAmplify::Init()
 {
    mPeak = 0.0;
 
-   SelectedTrackListOfKindIterator iter(Track::Wave, mTracks);
+   SelectedTrackListOfKindIterator iter(Track::Wave, inputTracks());
 
    for (Track *t = iter.First(); t; t = iter.Next())
    {
-      float min, max;
-      ((WaveTrack *)t)->GetMinMax(&min, &max, mT0, mT1);
+      auto pair = ((WaveTrack *)t)->GetMinMax(mT0, mT1); // may throw
+      const float min = pair.first, max = pair.second;
       float newpeak = (fabs(min) > fabs(max) ? fabs(min) : fabs(max));
 
       if (newpeak > mPeak)
@@ -179,13 +184,10 @@ bool EffectAmplify::Init()
 
 void EffectAmplify::Preview(bool dryOnly)
 {
-   double ratio = mRatio;
-   double peak = mPeak;
+   auto cleanup1 = valueRestorer( mRatio );
+   auto cleanup2 = valueRestorer( mPeak );
 
    Effect::Preview(dryOnly);
-
-   mRatio = ratio;
-   mPeak = peak;
 }
 
 void EffectAmplify::PopulateOrExchange(ShuttleGui & S)

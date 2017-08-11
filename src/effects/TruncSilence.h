@@ -43,6 +43,7 @@ public:
 
    wxString GetSymbol() override;
    wxString GetDescription() override;
+   wxString ManualPage() override;
 
    // EffectIdentInterface implementation
 
@@ -63,7 +64,7 @@ public:
    // amount of input for previewing.
    bool Analyze(RegionList &silenceList,
                         RegionList &trackSilences,
-                        WaveTrack* wt,
+                        const WaveTrack *wt,
                         sampleCount* silentFrame,
                         sampleCount* index,
                         int whichTrack,

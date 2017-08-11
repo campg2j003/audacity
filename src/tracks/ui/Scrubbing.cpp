@@ -17,7 +17,6 @@ Paul Licameli split from TrackPanel.cpp
 #include "../../Project.h"
 #include "../../TrackPanel.h"
 #include "../../TrackPanelCell.h"
-#include "../../TrackPanelCellIterator.h"
 #include "../../commands/CommandFunctors.h"
 #include "../../prefs/TracksPrefs.h"
 #include "../../toolbars/ControlToolBar.h"
@@ -33,6 +32,7 @@ Paul Licameli split from TrackPanel.cpp
 
 #include <algorithm>
 
+#include <wx/app.h>
 #include <wx/dc.h>
 
 // Yet another experimental scrub would drag the track under a
@@ -244,7 +244,7 @@ namespace {
          &Scrubber::OnSeek,        true,       &Scrubber::Seeks,
       },
 
-      { wxT("ToggleScrubRuler"),            XO("Scrub Ruler"),   XO(""),
+      { wxT("ToggleScrubRuler"),            XO("Scrub &Ruler"),   wxT(""),
          AlwaysEnabledFlag,
          &Scrubber::OnToggleScrubRuler, true,    &Scrubber::ShowsBar,
       },
@@ -276,7 +276,11 @@ void Scrubber::MarkScrubStart(
    ControlToolBar * const ctb = mProject->GetControlToolBar();
 
    // Stop any play in progress
+   // Bug 1492: mCancelled to stop us collapsing the selected region.
+   mCancelled = true;
    ctb->StopPlaying();
+   mCancelled = false;
+
    // Usually the timer handler of TrackPanel does this, but we do this now,
    // so that same timer does not StopPlaying() again after this function and destroy
    // scrubber state
@@ -398,6 +402,14 @@ bool Scrubber::MaybeStartScrubbing(wxCoord xx)
             mScrubToken =
                ctb->PlayPlayRegion(SelectedRegion(time0, time1), options,
                                    PlayMode::normalPlay, appearance, backwards);
+            if (mScrubToken <= 0) {
+               // Bug1627 (part of it):
+               // infinite error spew when trying to start scrub:
+               // If failed for reasons of audio device problems, do not try
+               // again with repeated timer ticks.
+               mScrubStartPosition = -1;
+               return false;
+            }
          }
       }
       else
@@ -494,7 +506,8 @@ void Scrubber::ContinueScrubbingUI()
    if (mDragging && !state.LeftIsDown()) {
       // Dragging scrub can stop with mouse up
       // Stop and set cursor
-      mProject->DoPlayStopSelect(true, state.ShiftDown());
+      bool bShift = state.ShiftDown();
+      mProject->DoPlayStopSelect(true, bShift);
       wxCommandEvent evt;
       mProject->GetControlToolBar()->OnStop(evt);
       return;
@@ -537,7 +550,8 @@ void Scrubber::StopScrubbing()
    if (HasStartedScrubbing() && !mCancelled) {
       const wxMouseState state(::wxGetMouseState());
       // Stop and set cursor
-      mProject->DoPlayStopSelect(true, state.ShiftDown());
+      bool bShift = state.ShiftDown();
+      mProject->DoPlayStopSelect(true, bShift);
    }
 
    mScrubStartPosition = -1;
@@ -953,9 +967,9 @@ const wxString &Scrubber::GetUntranslatedStateString() const
       return empty;
 }
 
-const wxString & Scrubber::StatusMessageForWave() const
+wxString Scrubber::StatusMessageForWave() const
 {
-   static wxString result;
+   wxString result;
    result = "";
 
    if(  Seeks() )

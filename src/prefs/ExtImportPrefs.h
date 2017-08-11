@@ -48,7 +48,8 @@ class ExtImportPrefs final : public PrefsPanel
  public:
    ExtImportPrefs(wxWindow * parent);
    ~ExtImportPrefs();
-   bool Apply() override;
+   bool Commit() override;
+   wxString HelpPageName() override;
 
    void OnPluginKeyDown(wxListEvent& event);
    void OnPluginBeginDrag(wxListEvent& event);

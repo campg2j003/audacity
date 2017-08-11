@@ -34,7 +34,7 @@ dnl Require autoconf >= 2.59
 AC_PREREQ([2.59])
 
 dnl Init autoconf
-AC_INIT([audacity], [2.1.3])
+AC_INIT([audacity], [2.2.0])
 dnl Check for existence of Audacity.h
 AC_CONFIG_SRCDIR([src/Audacity.h])
 AC_CONFIG_AUX_DIR([autotools])
@@ -237,7 +237,7 @@ AC_CHECK_HEADERS_ONCE(alloca.h)
 
 
 dnl Enable C++ 11 support. Use gnu++11 on GCC since wxWidgets uses extensions
-if test "${ax_cv_c_compiler_vendor}" = "gnu"; then
+if "${CXX}" -v 2>&1 | grep -q '^gcc version'; then
 
     dnl GCC < 4.9 has known bugs (#1397) and can't be used
     AX_GCC_VERSION_ATLEAST(4,9,0,[gcc_ok=yes], [gcc_ok=no])
@@ -350,7 +350,7 @@ dnl Optional library support. Lots of things we could use, but
 dnl can do without if they aren't available.
 dnl-------------------------------------------------------------
 dnl GSTREAMER removed for 2.0.6 release
-LIBRARIES="EXPAT FFMPEG LAME LIBFLAC LIBID3TAG LIBMAD LIBNYQUIST LIBSBSMS LIBSNDFILE LIBSOUNDTOUCH LIBSOXR LIBTWOLAME LIBVAMP LIBVORBIS LV2 PORTAUDIO PORTSMF WIDGETEXTRA"
+LIBRARIES="EXPAT FFMPEG LAME LIBFLAC LIBID3TAG LIBMAD LIBNYQUIST LIBSBSMS LIBSNDFILE LIBSOUNDTOUCH LIBSOXR LIBTWOLAME LIBVAMP LIBVORBIS LV2 PORTAUDIO PORTSMF PORTMIDI WIDGETEXTRA"
 
 AC_MSG_NOTICE([Determining what libraries are available in this tree and on the system])
 
@@ -372,10 +372,8 @@ AUDACITY_CHECKLIB_LIBVORBIS
 AUDACITY_CHECKLIB_LV2
 AUDACITY_CHECKLIB_PORTAUDIO
 AUDACITY_CHECKLIB_PORTSMF
+AUDACITY_CHECKLIB_PORTMIDI
 AUDACITY_CHECKLIB_WIDGETEXTRA
-
-FFMPEG_ARGUMENT=local
-LIBFLAC_ARGUMENT=local
 
 dnl Decide what libraries to build with, and whether to use system or local libraries
 dnl Set variables based on choices.
@@ -503,6 +501,7 @@ AUDACITY_CONFIG_LIBVORBIS
 AUDACITY_CONFIG_LV2
 AUDACITY_CONFIG_PORTAUDIO
 AUDACITY_CONFIG_PORTSMF
+AUDACITY_CONFIG_PORTMIDI
 AUDACITY_CONFIG_WIDGETEXTRA
 
 dnl--------------------------------------------------------------------------

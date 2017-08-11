@@ -57,7 +57,7 @@ class AButton final : public wxWindow {
    virtual ~ AButton();
 
    bool AcceptsFocus() const override { return s_AcceptsFocus; }
-   bool AcceptsFocusFromKeyboard() const override { return true; }
+   bool AcceptsFocusFromKeyboard() const override { return mEnabled; }
 
    void SetFocusFromKbd() override;
 
@@ -122,6 +122,9 @@ class AButton final : public wxWindow {
    void ClearDoubleClicked() { mIsDoubleClicked = false; }
 
    void SetButtonToggles( bool toggler ){ mToggle = toggler;}
+   // When click is over and mouse has moved away, a normal button
+   // should pop up.
+   void InteractionOver(){ if( !mToggle ) PopUp();}
    void Toggle(){ mButtonIsDown ? PopUp() : PushDown();}
    void Click();
    void SetShift(bool shift);
@@ -172,7 +175,6 @@ class AButton final : public wxWindow {
    bool mWasControlDown;
 
    bool mCursorIsInWindow;
-   bool mButtonIsFocused;
    bool mButtonIsDown;
    bool mIsClicking;
    bool mEnabled;

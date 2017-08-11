@@ -19,13 +19,17 @@
 
 #include "MemoryX.h"
 #include <vector>
+#include <wx/atomic.h>
 
 #ifdef USE_MIDI
 
+// TODO: Put the relative paths into automake.
+
 #ifdef EXPERIMENTAL_MIDI_OUT
-#include "portmidi.h"
-#include "porttime.h"
-#include "allegro.h"
+#include "../lib-src/portmidi/pm_common/portmidi.h"
+#include "../lib-src/portmidi/porttime/porttime.h"
+#include <cstring> // Allegro include fails if this header isn't included do to no memcpy
+#include "../lib-src/portsmf/allegro.h"
 
 class NoteTrack;
 using NoteTrackArray = std::vector < NoteTrack* >;
@@ -35,7 +39,7 @@ using NoteTrackArray = std::vector < NoteTrack* >;
 #endif // USE_MIDI
 
 #if USE_PORTMIXER
-#include "portmixer.h"
+#include "../lib-src/portmixer/include/portmixer.h"
 #endif
 
 #include <wx/event.h>
@@ -52,7 +56,6 @@ class TimeTrack;
 class AudioThread;
 class Meter;
 class SelectedRegion;
-class TimeTrack;
 
 class AudacityProject;
 
@@ -121,6 +124,10 @@ struct AudioIOStartStreamOptions
    ScrubbingOptions *pScrubbingOptions {};
 #endif
 };
+
+// This workaround makes pause and stop work when output is to GarageBand,
+// which seems not to implement the notes-off message correctly.
+#define AUDIO_IO_GB_MIDI_WORKAROUND
 
 class AUDACITY_DLL_API AudioIO final {
 
@@ -223,7 +230,6 @@ class AUDACITY_DLL_API AudioIO final {
  public:
    bool SetHasSolo(bool hasSolo);
    bool GetHasSolo() { return mHasSolo; }
-   void SetMidiPlaySpeed(double s) { mMidiPlaySpeed = s * 0.01; }
 #endif
 
    /** \brief Returns true if the stream is active, or even if audio I/O is
@@ -368,6 +374,11 @@ class AUDACITY_DLL_API AudioIO final {
     */
    wxString GetDeviceInfo();
 
+#ifdef EXPERIMENTAL_MIDI_OUT
+   /** \brief Get diagnostic information on all the available MIDI I/O devices */
+   wxString GetMidiDeviceInfo();
+#endif
+
    /** \brief Ensure selected device names are valid
     *
     */
@@ -388,6 +399,7 @@ class AUDACITY_DLL_API AudioIO final {
    bool IsAvailable(AudacityProject *projecT);
    void SetCaptureMeter(AudacityProject *project, Meter *meter);
    void SetPlaybackMeter(AudacityProject *project, Meter *meter);
+   Meter * GetCaptureMeter();
 
 private:
    /** \brief Set the current VU meters - this should be done once after
@@ -428,11 +440,8 @@ private:
    void OutputEvent();
    void FillMidiBuffers();
    void GetNextEvent();
-   void AudacityMidiCallback();
    double AudioTime() { return mT0 + mNumFrames / mRate; }
    double PauseTime();
-   // double getCurrentTrackTime();
-   // long CalculateMidiTimeStamp(double time);
    void AllNotesOff();
 #endif
 
@@ -484,12 +493,25 @@ private:
    /** \brief How many sample rates to try */
    static const int NumRatesToTry;
 
+   /** \brief True if the end time is before the start time */
    bool ReversedTime() const
    {
       return mT1 < mT0;
    }
+   /** \brief Clamps the given time to be between mT0 and mT1
+    *
+    * Returns the bound if the value is out of bounds; does not wrap.
+    * Returns a time in seconds.
+    * @param absoluteTime A time in seconds, usually mTime
+    */
    double LimitStreamTime(double absoluteTime) const;
 
+   /** \brief Normalizes the given time, clamping it and handling gaps from cut preview.
+    *
+    * Clamps the time (unless scrubbing), and skips over the cut section.
+    * Returns a time in seconds.
+    * @param absoluteTime A time in seconds, usually mTime
+    */
    double NormalizeStreamTime(double absoluteTime) const;
 
    /** \brief Clean up after StartStream if it fails.
@@ -501,35 +523,48 @@ private:
    //   MIDI_PLAYBACK:
    PmStream        *mMidiStream;
    PmError          mLastPmError;
-   long             mMidiLatency; // latency value for PortMidi
-   long             mSynthLatency; // latency of MIDI synthesizer
-   double           mMidiPlaySpeed; // a copy of TranscriptionToolBar::mPlaySpeed
+   /// Latency value for PortMidi
+   long             mMidiLatency;
+   /// Latency of MIDI synthesizer
+   long             mSynthLatency;
 
-   // These fields are used to synchronize MIDI with audio
-   volatile double  mAudioCallbackOutputTime; // PortAudio's outTime
-   volatile long    mNumFrames;         // includes pauses
-   volatile long    mNumPauseFrames;    // how many frames of zeros inserted?
-   volatile long    mPauseTime;         // pause in ms if no audio playback
-   volatile double  mMidiLoopOffset;    // total of backward jumps
+   // These fields are used to synchronize MIDI with audio:
+
+   /// PortAudio's outTime
+   volatile double  mAudioCallbackOutputTime;
+   /// Number of frames output, including pauses
+   volatile long    mNumFrames;
+   /// How many frames of zeros were output due to pauses?
+   volatile long    mNumPauseFrames;
+   /// total of backward jumps
+   volatile double  mMidiLoopOffset;
    volatile long    mAudioFramesPerBuffer;
-   volatile bool    mMidiPaused;        // used by Midi process to record
-       // that pause has begun. Pause time is accumulated in mPauseTime.
-       // This variable is shared so that it can be cleared when playback
-       // begins.
+   /// Used by Midi process to record that pause has begun,
+   /// so that AllNotesOff() is only delivered once
+   volatile bool    mMidiPaused;
 
    Alg_seq_ptr      mSeq;
    std::unique_ptr<Alg_iterator> mIterator;
-   Alg_event_ptr    mNextEvent; // the next event to play (or null)
-   double           mNextEventTime; // the time of the next event
-                       // (note that this could be a note's time+duration)
-   NoteTrack        *mNextEventTrack; // track of next event
-   bool             mMidiOutputComplete; // true when output reaches mT1
-   bool             mNextIsNoteOn; // is the next event a note-off?
-   //   int                 mCnt;
-   // mMidiStreamActive tells when mMidiStream is open for output
+   /// The next event to play (or null)
+   Alg_event_ptr    mNextEvent;
+
+#ifdef AUDIO_IO_GB_MIDI_WORKAROUND
+   std::vector< std::pair< int, int > > mPendingNotesOff;
+#endif
+
+   /// Time at which the next event should be output, measured in seconds.
+   /// Note that this could be a note's time+duration for note offs.
+   double           mNextEventTime;
+   /// Track of next event
+   NoteTrack        *mNextEventTrack;
+   /// True when output reaches mT1
+   bool             mMidiOutputComplete;
+   /// Is the next event a note-on?
+   bool             mNextIsNoteOn;
+   /// mMidiStreamActive tells when mMidiStream is open for output
    bool             mMidiStreamActive;
-   // when true, mSendMidiState means send only updates, not note-on's,
-   // used to send state changes that precede the selected notes
+   /// when true, mSendMidiState means send only updates, not note-on's,
+   /// used to send state changes that precede the selected notes
    bool             mSendMidiState;
    NoteTrackArray   mMidiPlaybackTracks;
 #endif
@@ -555,30 +590,40 @@ private:
 #ifdef EXPERIMENTAL_MIDI_OUT
    std::unique_ptr<AudioThread> mMidiThread;
 #endif
-   Resample          **mResample;
-   RingBuffer        **mCaptureBuffers;
+   ArrayOf<std::unique_ptr<Resample>> mResample;
+   ArrayOf<std::unique_ptr<RingBuffer>> mCaptureBuffers;
    WaveTrackArray      mCaptureTracks;
-   RingBuffer        **mPlaybackBuffers;
+   ArrayOf<std::unique_ptr<RingBuffer>> mPlaybackBuffers;
    ConstWaveTrackArray mPlaybackTracks;
 
-   Mixer             **mPlaybackMixers;
+   ArrayOf<std::unique_ptr<Mixer>> mPlaybackMixers;
    volatile int        mStreamToken;
    static int          mNextStreamToken;
    double              mFactor;
+   /// Audio playback rate in samples per second
    double              mRate;
-   double              mT0; // playback starts at offset of mT0
-   double              mT1; // and ends at offset of mT1
-   double              mTime; // current time position during playback
-   double              mWarpedTime; // current time after warping, starting at zero (unlike mTime)
-   double              mWarpedLength; // total length after warping
+   /// Playback starts at offset of mT0, which is measured in seconds.
+   double              mT0;
+   /// Playback ends at offset of mT1, which is measured in seconds.  Note that mT1 may be less than mT0 during scrubbing.
+   double              mT1;
+   /// Current time position during playback, in seconds.  Between mT0 and mT1.
+   double              mTime;
+   /// Current time after warping, starting at zero (unlike mTime).
+   /// Length in real seconds between mT0 and mTime.
+   double              mWarpedTime;
+   /// Total length after warping via a time track.
+   /// Length in real seconds between mT0 and mT1.  Always positive.
+   double              mWarpedLength;
    double              mSeek;
    double              mPlaybackRingBufferSecs;
    double              mCaptureRingBufferSecs;
    size_t              mPlaybackSamplesToCopy;
    double              mMinCaptureSecsToCopy;
+   /// True if audio playback is paused
    bool                mPaused;
    PaStream           *mPortStreamV19;
    bool                mSoftwarePlaythrough;
+   /// True if Sound Activated Recording is enabled
    bool                mPauseRec;
    float               mSilenceLevel;
    unsigned int        mNumCaptureChannels;
@@ -642,7 +687,7 @@ private:
 
    friend void InitAudioIO();
 
-   TimeTrack *mTimeTrack;
+   const TimeTrack *mTimeTrack;
 
    // For cacheing supported sample rates
    static int mCachedPlaybackIndex;
@@ -692,6 +737,14 @@ private:
    bool mSilentScrub;
    sampleCount mScrubDuration;
 #endif
+
+   // A flag tested and set in one thread, cleared in another.  Perhaps
+   // this guarantee of atomicity is more cautious than necessary.
+   wxAtomicInt mRecordingException {};
+   void SetRecordingException()
+      { wxAtomicInc( mRecordingException ); }
+   void ClearRecordingException()
+      { if (mRecordingException) wxAtomicDec( mRecordingException ); }
 };
 
 #endif

@@ -20,10 +20,9 @@
 #include "../Audacity.h"
 #include "TracksPrefs.h"
 
-#include <algorithm>
-#include <wx/defs.h>
+//#include <algorithm>
+//#include <wx/defs.h>
 
-#include "../Experimental.h"
 #include "../Prefs.h"
 #include "../ShuttleGui.h"
 #include "../WaveTrack.h"
@@ -60,23 +59,8 @@ TracksPrefs::~TracksPrefs()
 {
 }
 
-const wxChar *TracksPrefs::ScrollingPreferenceKey()
-{
-   static auto string = wxT("/GUI/ScrollBeyondZero");
-   return string;
-}
-
 void TracksPrefs::Populate()
 {
-   mSoloCodes.Add(wxT("Simple"));
-   mSoloCodes.Add(wxT("Multi"));
-   mSoloCodes.Add(wxT("None"));
-
-   mSoloChoices.Add(_("Simple"));
-   mSoloChoices.Add(_("Multi-track"));
-   mSoloChoices.Add(_("None"));
-
-
    // Keep view choices and codes in proper correspondence --
    // we don't display them by increasing integer values.
 
@@ -88,6 +72,15 @@ void TracksPrefs::Populate()
 
    mViewChoices.Add(_("Spectrogram"));
    mViewCodes.Add(WaveTrack::Spectrum);
+
+
+   // How samples are displayed when zoomed in:
+
+   mSampleDisplayChoice.Add(_("Connect dots"));
+   mSampleDisplayCodes.Add((int) WaveTrack::LinarInterpolate);
+
+   mSampleDisplayChoice.Add(_("Stem plot"));
+   mSampleDisplayCodes.Add((int) WaveTrack::StemPlot);
 
    //------------------------- Main section --------------------
    // Now construct the GUI itself.
@@ -107,10 +100,10 @@ void TracksPrefs::PopulateOrExchange(ShuttleGui & S)
       S.TieCheckBox(_("&Pinned Recording/Playback head"),
                     PinnedHeadPreferenceKey(),
                     PinnedHeadPreferenceDefault());
-      S.TieCheckBox(_("&Update display when Recording/Playback head unpinned"),
+      S.TieCheckBox(_("A&uto-scroll if head unpinned"),
                     wxT("/GUI/AutoScroll"),
                     true);
-      S.TieCheckBox(_("Automatically &fit tracks vertically zoomed"),
+      S.TieCheckBox(_("Auto-&fit track height"),
                     wxT("/GUI/TracksFitVerticallyZoomed"),
                     false);
 
@@ -125,6 +118,13 @@ void TracksPrefs::PopulateOrExchange(ShuttleGui & S)
                      mViewCodes);
          S.SetSizeHints(mViewChoices);
 
+         S.TieChoice(_("Display &samples:"),
+                     wxT("/GUI/SampleView"),
+                     1,
+                     mSampleDisplayChoice,
+                     mSampleDisplayCodes);
+         S.SetSizeHints(mSampleDisplayChoice);
+
          S.TieTextBox(_("Default audio track &name:"),
                       wxT("/GUI/TrackNames/DefaultTrackName"),
                       _("Audio Track"),
@@ -135,48 +135,6 @@ void TracksPrefs::PopulateOrExchange(ShuttleGui & S)
       S.TieCheckBox(_("Sho&w audio track name as overlay"),
                   wxT("/GUI/ShowTrackNameInWaveform"),
                   false);
-   }
-   S.EndStatic();
-
-   S.StartStatic(_("Behaviors"));
-   {
-      S.TieCheckBox(_("&Select then act on entire project, if no audio selected"),
-                    wxT("/GUI/SelectAllOnNone"),
-                    true);
-      /* i18n-hint: cut-lines are a lines indicating where to cut.*/
-      S.TieCheckBox(_("Enable cut &lines"),
-                    wxT("/GUI/EnableCutLines"),
-                    false);
-      S.TieCheckBox(_("Enable &dragging of left and right selection edges"),
-                    wxT("/GUI/AdjustSelectionEdges"),
-                    true);
-      S.TieCheckBox(_("\"Move track focus\" c&ycles repeatedly through tracks"),
-                    wxT("/GUI/CircularTrackNavigation"),
-                    false);
-      S.TieCheckBox(_("Editing a clip can &move other clips"),
-                    wxT("/GUI/EditClipCanMove"),
-                    true);
-      S.TieCheckBox(_("&Type to create a label"),
-                    wxT("/GUI/TypeToCreateLabel"),
-                    true);
-#ifdef EXPERIMENTAL_SCROLLING_LIMITS
-      S.TieCheckBox(_("Enable scrolling left of &zero"),
-                    ScrollingPreferenceKey(),
-                    ScrollingPreferenceDefault());
-#endif
-
-      S.AddSpace(10);
-
-      S.StartMultiColumn(2);
-      {
-         S.TieChoice(_("Solo &Button:"),
-                     wxT("/GUI/Solo"),
-                     wxT("Standard"),
-                     mSoloChoices,
-                     mSoloCodes);
-         S.SetSizeHints(mSoloChoices);
-      }
-      S.EndMultiColumn();
    }
    S.EndStatic();
 }
@@ -200,12 +158,37 @@ void TracksPrefs::SetPinnedHeadPreference(bool value, bool flush)
       gPrefs->Flush();
 }
 
-bool TracksPrefs::Apply()
+wxString TracksPrefs::GetDefaultAudioTrackNamePreference()
 {
+   const auto name =
+      gPrefs->Read(wxT("/GUI/TrackNames/DefaultTrackName"), wxT(""));
+   if (name.empty())
+      // When nothing was specified,
+      // the default-default is whatever translation of...
+      return _("Audio Track");
+   else
+      return name;
+}
+
+bool TracksPrefs::Commit()
+{
+   // Bug 1583: Clear the caching of the preference pinned state.
+   iPreferencePinned = -1;
    ShuttleGui S(this, eIsSavingToPrefs);
    PopulateOrExchange(S);
 
+   if (gPrefs->Read(wxT("/GUI/TrackNames/DefaultTrackName"),
+                    _("Audio Track")) == _("Audio Track")) {
+      gPrefs->DeleteEntry(wxT("/GUI/TrackNames/DefaultTrackName"));
+      gPrefs->Flush();
+   }
+
    return true;
+}
+
+wxString TracksPrefs::HelpPageName()
+{
+   return "Tracks_Preferences";
 }
 
 PrefsPanel *TracksPrefsFactory::Create(wxWindow *parent)

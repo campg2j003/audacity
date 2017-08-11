@@ -52,6 +52,7 @@ in which buttons can be placed.
 #include "../commands/Keyboard.h"
 #include "../widgets/AButton.h"
 #include "../widgets/Grabber.h"
+#include "../Prefs.h"
 
 ////////////////////////////////////////////////////////////
 /// ToolBarResizer
@@ -142,9 +143,9 @@ void ToolBarResizer::OnPaint( wxPaintEvent & event )
    // Under GTK, we specifically set the toolbar background to the background
    // colour in the system theme.
 #if defined( __WXGTK__ )
-   dc.SetBackground( wxBrush( wxSystemSettings::GetColour( wxSYS_COLOUR_BACKGROUND ) ) );
+//   dc.SetBackground( wxBrush( wxSystemSettings::GetColour( wxSYS_COLOUR_BACKGROUND ) ) );
 #endif
-
+   dc.SetBackground( wxBrush( theTheme.Colour( clrMedium  ) ) );
    dc.Clear();
 
    wxSize sz = GetSize();
@@ -463,6 +464,9 @@ void ToolBar::Create( wxWindow *parent )
 
 void ToolBar::ReCreateButtons()
 {
+   wxSize sz3 = GetSize();
+   //wxLogDebug( "x:%i y:%i",sz3.x, sz3.y);
+
    // SetSizer(NULL) detaches mHSizer and deletes it.
    // Do not use Detach() here, as that attempts to detach mHSizer from itself!
    SetSizer( NULL );
@@ -483,9 +487,6 @@ void ToolBar::ReCreateButtons()
       // Use a box sizer for laying out controls
       ms->Add((mHSizer = safenew wxBoxSizer(wxHORIZONTAL)), 1, wxEXPAND);
 
-      // (Re)Establish dock state
-      SetDocked(GetDock(), false);
-
       // Go add all the rest of the gadgets
       Populate();
 
@@ -497,6 +498,10 @@ void ToolBar::ReCreateButtons()
          ms->Add(mResizer, 0, wxEXPAND | wxALIGN_TOP | wxLEFT, 1);
          mResizer->SetToolTip(_("Click and drag to resize toolbar"));
       }
+      
+      // Set dock after possibly creating resizer.
+      // (Re)Establish dock state
+      SetDocked(GetDock(), false);
 
       // Set the sizer
       SetSizerAndFit(ms.release());
@@ -510,14 +515,19 @@ void ToolBar::ReCreateButtons()
    // Set the true AND minimum sizes and do final layout
    if(IsResizable())
    {
-      sz.SetWidth(GetMinToolbarWidth());
       // JKC we're going to allow all resizable toolbars to be resized
-      // to 1 unit high!
+      // to 1 unit high, typically 27 pixels.
       wxSize sz2 = sz;
+      sz2.SetWidth(GetMinToolbarWidth());
       sz2.y = tbs -1;
       SetMinSize(sz2);
-      sz.SetWidth(GetInitialWidth());
-      SetSize(sz);
+      // Initial size at least as big as minimum.
+      if( sz3.y < sz2.y )
+         sz3.y = sz2.y;
+      if( sz3.x < sz2.x )
+         sz3.x = GetInitialWidth();
+      //sz.SetWidth();
+      SetSize(sz3);
    }
    else
    {
@@ -541,6 +551,9 @@ void ToolBar::UpdatePrefs()
    if ( mResizer )
    {
       mResizer->SetToolTip( _("Click and drag to resize toolbar") );
+      wxSizeEvent e;
+      GetParent()->GetEventHandler()->AddPendingEvent( e );
+      GetParent()->Refresh();
    }
 #endif
 
@@ -584,8 +597,10 @@ void ToolBar::SetDocked( ToolDock *dock, bool pushed )
 //
 void ToolBar::Updated()
 {
-   wxCommandEvent e( EVT_TOOLBAR_UPDATED, GetId() );
-   GetParent()->GetEventHandler()->AddPendingEvent( e );
+   if( IsDocked() )
+      GetDock()->Updated();
+   //wxCommandEvent e( EVT_TOOLBAR_UPDATED, GetId() );
+   //GetParent()->GetEventHandler()->AddPendingEvent( e );
 }
 
 //
@@ -685,12 +700,17 @@ void ToolBar::MakeMacRecoloredImage(teBmps eBmpOut, teBmps eBmpIn )
 
 void ToolBar::MakeRecoloredImage( teBmps eBmpOut, teBmps eBmpIn )
 {
+   // Don't recolour the buttons...
+   MakeMacRecoloredImage( eBmpOut, eBmpIn );
+   return;
    wxImage * pSrc = &theTheme.Image( eBmpIn );
 #if defined( __WXGTK__ )
    wxColour newColour = wxSystemSettings::GetColour( wxSYS_COLOUR_BACKGROUND );
 #else
    wxColour newColour = wxSystemSettings::GetColour( wxSYS_COLOUR_3DFACE );
 #endif
+
+   newColour = wxColour( 60,60,60 );
    wxColour baseColour = wxColour( 204, 204, 204 );
 
    auto pPattern = ChangeImageColour( pSrc, baseColour, newColour );
@@ -700,28 +720,50 @@ void ToolBar::MakeRecoloredImage( teBmps eBmpOut, teBmps eBmpIn )
 
 void ToolBar:: MakeButtonBackgroundsLarge()
 {
-#ifdef USE_AQUA_THEME
-   MakeMacRecoloredImage( bmpRecoloredUpLarge,     bmpMacUpButton );
-   MakeMacRecoloredImage( bmpRecoloredDownLarge,   bmpMacDownButton );
-   MakeMacRecoloredImage( bmpRecoloredHiliteLarge, bmpMacHiliteButton );
-#else
-   MakeRecoloredImage( bmpRecoloredUpLarge,     bmpUpButtonLarge );
-   MakeRecoloredImage( bmpRecoloredDownLarge,   bmpDownButtonLarge );
-   MakeRecoloredImage( bmpRecoloredHiliteLarge, bmpHiliteButtonLarge );
+
+   bool bUseAqua = false;
+
+#ifdef EXPERIMENTAL_THEME_PREFS
+   gPrefs->Read( wxT("/GUI/ShowMac"), &bUseAqua, false);
 #endif
+
+#ifdef USE_AQUA_THEME
+   bUseAqua = !bUseAqua;
+#endif
+
+   if( bUseAqua ){
+      MakeMacRecoloredImage( bmpRecoloredUpLarge,     bmpMacUpButton );
+      MakeMacRecoloredImage( bmpRecoloredDownLarge,   bmpMacDownButton );
+      MakeMacRecoloredImage( bmpRecoloredHiliteLarge, bmpMacHiliteButton );
+   } else {
+      MakeRecoloredImage( bmpRecoloredUpLarge,     bmpUpButtonLarge );
+      MakeRecoloredImage( bmpRecoloredDownLarge,   bmpDownButtonLarge );
+      MakeRecoloredImage( bmpRecoloredHiliteLarge, bmpHiliteButtonLarge );
+   }
 }
 
 void ToolBar::MakeButtonBackgroundsSmall()
 {
-#ifdef USE_AQUA_THEME
-   MakeMacRecoloredImage( bmpRecoloredUpSmall,     bmpMacUpButtonSmall );
-   MakeMacRecoloredImage( bmpRecoloredDownSmall,   bmpMacDownButtonSmall );
-   MakeMacRecoloredImage( bmpRecoloredHiliteSmall, bmpMacHiliteButtonSmall );
-#else
-   MakeRecoloredImage( bmpRecoloredUpSmall,     bmpUpButtonSmall );
-   MakeRecoloredImage( bmpRecoloredDownSmall,   bmpDownButtonSmall );
-   MakeRecoloredImage( bmpRecoloredHiliteSmall, bmpHiliteButtonSmall );
+
+   bool bUseAqua = false;
+
+#ifdef EXPERIMENTAL_THEME_PREFS
+   gPrefs->Read( wxT("/GUI/ShowMac"), &bUseAqua, false);
 #endif
+
+#ifdef USE_AQUA_THEME
+   bUseAqua = !bUseAqua;
+#endif
+
+   if( bUseAqua ){
+      MakeMacRecoloredImage( bmpRecoloredUpSmall,     bmpMacUpButtonSmall );
+      MakeMacRecoloredImage( bmpRecoloredDownSmall,   bmpMacDownButtonSmall );
+      MakeMacRecoloredImage( bmpRecoloredHiliteSmall, bmpMacHiliteButtonSmall );
+   } else {
+      MakeRecoloredImage( bmpRecoloredUpSmall,     bmpUpButtonSmall );
+      MakeRecoloredImage( bmpRecoloredDownSmall,   bmpDownButtonSmall );
+      MakeRecoloredImage( bmpRecoloredHiliteSmall, bmpHiliteButtonSmall );
+   }
 }
 
 /// Makes a button and its four different state bitmaps
@@ -792,27 +834,13 @@ void ToolBar::MakeAlternateImages(AButton &button, int idx,
 void ToolBar::SetButtonToolTip
 (AButton &button, const std::vector<wxString> &commands, const wxString &separator)
 {
-   const auto project = GetActiveProject();
-   const auto commandManager = project ? project->GetCommandManager() : nullptr;
    wxString result;
-   auto iter = commands.begin(), end = commands.end();
-   while (iter != end) {
-      result += *iter++;
-      if (iter != end) {
-         if (!iter->empty()) {
-            if (commandManager) {
-               auto keyStr = commandManager->GetKeyFromName(*iter);
-               if (!keyStr.empty()) {
-                  result += wxT(" ");
-                  result += Internat::Parenthesize(KeyStringDisplay(keyStr, true));
-               }
-            }
-         }
-         ++iter;
-      }
-      if (iter != end)
-         result += separator;
-   }
+   const auto project = GetActiveProject();
+   const auto commandManager =
+      project ? project->GetCommandManager() : nullptr;
+   if (commandManager)
+      result =
+         commandManager->DescribeCommandsAndShortcuts(commands, separator);
    button.SetToolTip(result);
 }
 
@@ -851,9 +879,9 @@ void ToolBar::OnPaint( wxPaintEvent & event )
    // Under GTK, we specifically set the toolbar background to the background
    // colour in the system theme.
 #if defined( __WXGTK__ )
-   dc.SetBackground( wxBrush( wxSystemSettings::GetColour( wxSYS_COLOUR_BACKGROUND ) ) );
+   //dc.SetBackground( wxBrush( wxSystemSettings::GetColour( wxSYS_COLOUR_BACKGROUND ) ) );
 #endif
-
+   dc.SetBackground( wxBrush( theTheme.Colour( clrMedium  ) ) );
    dc.Clear();
 
 // EXPERIMENTAL_THEMING is set to not apply the gradient
@@ -861,7 +889,7 @@ void ToolBar::OnPaint( wxPaintEvent & event )
 #ifdef USE_AQUA_THEME
    Repaint( &dc );
 #else
-
+   return;
 #ifdef EXPERIMENTAL_THEMING
    wxImage * mpBackGradient =   &theTheme.Image( bmpRecoloredUpLarge  );
 

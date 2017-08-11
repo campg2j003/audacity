@@ -25,6 +25,7 @@ See also BatchCommandDialog and BatchProcessDialog.
 #include <wx/filedlg.h>
 #include <wx/textfile.h>
 
+#include "AudacityApp.h"
 #include "Project.h"
 #include "commands/CommandManager.h"
 #include "effects/EffectManager.h"
@@ -327,7 +328,7 @@ wxString BatchCommands::PromptForParamsFor(const wxString & command, const wxStr
 
    wxString res = params;
 
-   EffectManager::Get().SetBatchProcessing(ID, true);
+   auto cleanup = EffectManager::Get().SetBatchProcessing(ID);
 
    if (EffectManager::Get().SetEffectParameters(ID, params))
    {
@@ -336,8 +337,6 @@ wxString BatchCommands::PromptForParamsFor(const wxString & command, const wxStr
          res = EffectManager::Get().GetEffectParameters(ID);
       }
    }
-
-   EffectManager::Get().SetBatchProcessing(ID, false);
 
    return res;
 }
@@ -416,8 +415,9 @@ wxString BatchCommands::BuildCleanFileName(const wxString &fileName, const wxStr
    const wxFileName newFileName{ fileName };
    wxString justName = newFileName.GetName();
    wxString pathName = newFileName.GetPath(wxPATH_GET_VOLUME | wxPATH_GET_SEPARATOR);
+   const auto cleanedString = _("cleaned");
 
-   if (justName == wxT("")) {
+   if (justName.empty()) {
       wxDateTime now = wxDateTime::Now();
       int year = now.GetYear();
       wxDateTime::Month month = now.GetMonth();
@@ -434,23 +434,23 @@ wxString BatchCommands::BuildCleanFileName(const wxString &fileName, const wxStr
 //      double endTime = project->mTracks->GetEndTime();
 //      double startTime = 0.0;
       //OnSelectAll();
-      pathName = gPrefs->Read(wxT("/DefaultOpenPath"), ::wxGetCwd());
-      ::wxMessageBox(wxString::Format(wxT("Export recording to %s\n/cleaned/%s%s"),
-                                      pathName.c_str(), justName.c_str(), extension.c_str()),
-                     wxT("Export recording"),
-                  wxOK | wxCENTRE);
-      pathName += wxT("/");
+      pathName = FileNames::FindDefaultPath(FileNames::Operation::Export);
+      ::wxMessageBox(wxString::Format(_("Export recording to %s\n/%s/%s%s"),
+            pathName.c_str(), cleanedString.c_str(), justName.c_str(), extension.c_str()),
+         _("Export recording"),
+         wxOK | wxCENTRE);
+      pathName += wxFileName::GetPathSeparator();
    }
    wxString cleanedName = pathName;
-   cleanedName += wxT("cleaned");
+   cleanedName += cleanedString;
    bool flag  = ::wxFileName::FileExists(cleanedName);
    if (flag == true) {
-      ::wxMessageBox(wxT("Cannot create directory 'cleaned'. \nFile already exists that is not a directory"));
-      return wxT("");
+      ::wxMessageBox(_("Cannot create directory 'cleaned'. \nFile already exists that is not a directory"));
+      return wxString{};
    }
    ::wxFileName::Mkdir(cleanedName, 0777, wxPATH_MKDIR_FULL); // make sure it exists
 
-   cleanedName += wxT("/");
+   cleanedName += wxFileName::GetPathSeparator();
    cleanedName += justName;
    cleanedName += extension;
    wxGetApp().AddFileToHistory(cleanedName);
@@ -480,10 +480,14 @@ bool BatchCommands::WriteMp3File( const wxString & Name, int bitrate )
    bool rc;
    long prevBitRate = gPrefs->Read(wxT("/FileFormats/MP3Bitrate"), 128);
    gPrefs->Write(wxT("/FileFormats/MP3Bitrate"), bitrate);
+
+   auto cleanup = finally( [&] {
+      gPrefs->Write(wxT("/FileFormats/MP3Bitrate"), prevBitRate);
+      gPrefs->Flush();
+   } );
+
    // Use Mp3Stereo to control if export is to a stereo or mono file
    rc = mExporter.Process(project, numChannels, wxT("MP3"), Name, false, 0.0, endTime);
-   gPrefs->Write(wxT("/FileFormats/MP3Bitrate"), prevBitRate);
-   gPrefs->Flush();
    return rc;
 }
 
@@ -601,7 +605,7 @@ bool BatchCommands::ApplyEffectCommand(const PluginID & ID, const wxString & com
 
    bool res = false;
 
-   EffectManager::Get().SetBatchProcessing(ID, true);
+   auto cleanup = EffectManager::Get().SetBatchProcessing(ID);
 
    // transfer the parameters to the effect...
    if (EffectManager::Get().SetEffectParameters(ID, params))
@@ -611,8 +615,6 @@ bool BatchCommands::ApplyEffectCommand(const PluginID & ID, const wxString & com
                                   AudacityProject::OnEffectFlags::kSkipState |
                                   AudacityProject::OnEffectFlags::kDontRepeatLast);
    }
-
-   EffectManager::Get().SetBatchProcessing(ID, false);
 
    return res;
 }
@@ -647,17 +649,15 @@ bool BatchCommands::ApplyCommand(const wxString & command, const wxString & para
 bool BatchCommands::ApplyCommandInBatchMode(const wxString & command, const wxString &params)
 {
    AudacityProject *project = GetActiveProject();
-   bool rc;
 
    // enter batch mode...
    bool prevShowMode = project->GetShowId3Dialog();
+   auto cleanup = finally( [&] {
+      // exit batch mode...
+      project->SetShowId3Dialog(prevShowMode);
+   } );
 
-   rc = ApplyCommand( command, params );
-
-   // exit batch mode...
-   project->SetShowId3Dialog(prevShowMode);
-
-   return rc;
+   return ApplyCommand( command, params );
 }
 
 // ApplyChain returns true on success, false otherwise.
@@ -665,29 +665,31 @@ bool BatchCommands::ApplyCommandInBatchMode(const wxString & command, const wxSt
 bool BatchCommands::ApplyChain(const wxString & filename)
 {
    mFileName = filename;
-   unsigned int i;
-   bool res = true;
+
+   AudacityProject *proj = GetActiveProject();
+   bool res = false;
+   auto cleanup = finally( [&] {
+      if (!res) {
+         if(proj) {
+            // Chain failed or was cancelled; revert to the previous state
+            proj->RollbackState();
+         }
+      }
+   } );
 
    mAbort = false;
 
-   for (i = 0; i < mCommandChain.GetCount(); i++) {
-      if (!ApplyCommandInBatchMode(mCommandChain[i], mParamsChain[i]) || mAbort) {
-         res = false;
+   size_t i = 0;
+   for (; i < mCommandChain.GetCount(); i++) {
+      if (!ApplyCommandInBatchMode(mCommandChain[i], mParamsChain[i]) || mAbort)
          break;
-      }
    }
+
+   res = (i == mCommandChain.GetCount());
+   if (!res)
+      return false;
 
    mFileName.Empty();
-   AudacityProject *proj = GetActiveProject();
-
-   if (!res)
-   {
-      if(proj) {
-         // Chain failed or was cancelled; revert to the previous state
-         proj->RollbackState();
-      }
-      return false;
-   }
 
    // Chain was successfully applied; save the NEW project state
    wxString longDesc, shortDesc;

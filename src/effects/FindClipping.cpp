@@ -26,7 +26,6 @@
 
 #include <wx/intl.h>
 
-#include "../AudacityApp.h"
 #include "../ShuttleGui.h"
 #include "../widgets/valnum.h"
 
@@ -60,6 +59,11 @@ wxString EffectFindClipping::GetSymbol()
 wxString EffectFindClipping::GetDescription()
 {
    return XO("Creates labels where clipping is detected");
+}
+
+wxString EffectFindClipping::ManualPage()
+{
+   return wxT("Find_Clipping");
 }
 
 // EffectIdentInterface implementation
@@ -96,11 +100,10 @@ bool EffectFindClipping::Process()
 {
    std::shared_ptr<AddedAnalysisTrack> addedTrack;
    Maybe<ModifiedAnalysisTrack> modifiedTrack;
-   //Track *original = NULL;
    const wxString name{ _("Clipping") };
 
    LabelTrack *lt = NULL;
-   TrackListOfKindIterator iter(Track::Label, mTracks);
+   TrackListOfKindIterator iter(Track::Label, inputTracks());
    for (Track *t = iter.First(); t; t = iter.Next()) {
       if (t->GetName() == name) {
          lt = (LabelTrack *)t;
@@ -116,7 +119,7 @@ bool EffectFindClipping::Process()
    int count = 0;
 
    // JC: Only process selected tracks.
-   SelectedTrackListOfKindIterator waves(Track::Wave, mTracks);
+   SelectedTrackListOfKindIterator waves(Track::Wave, inputTracks());
    WaveTrack *t = (WaveTrack *) waves.First();
    while (t) {
       double trackStart = t->GetStartTime();
@@ -159,19 +162,19 @@ bool EffectFindClipping::ProcessOne(LabelTrack * lt,
       return true;
    }
 
-   float *buffer;
+   Floats buffer;
    try {
       if (blockSize < mStart)
          // overflow
          throw std::bad_alloc{};
-      buffer = new float[blockSize];
+      buffer.reinit(blockSize);
    }
    catch( const std::bad_alloc & ) {
       wxMessageBox(_("Requested value exceeds memory capacity."));
       return false;
    }
 
-   float *ptr = buffer;
+   float *ptr = buffer.get();
 
    decltype(len) s = 0, startrun = 0, stoprun = 0, samps = 0;
    decltype(blockSize) block = 0;
@@ -188,8 +191,8 @@ bool EffectFindClipping::ProcessOne(LabelTrack * lt,
 
          block = limitSampleBufferSize( blockSize, len - s );
 
-         wt->Get((samplePtr)buffer, floatSample, start + s, block);
-         ptr = buffer;
+         wt->Get((samplePtr)buffer.get(), floatSample, start + s, block);
+         ptr = buffer.get();
       }
 
       float v = fabs(*ptr++);
@@ -226,8 +229,6 @@ bool EffectFindClipping::ProcessOne(LabelTrack * lt,
       s++;
       block--;
    }
-
-   delete [] buffer;
 
    return bGoodResult;
 }

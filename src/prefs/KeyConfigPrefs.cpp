@@ -39,7 +39,7 @@ KeyConfigPrefs and MousePrefs use.
 #include "../Internat.h"
 #include "../ShuttleGui.h"
 
-#include "FileDialog.h"
+#include "../FileNames.h"
 
 #if defined(EXPERIMENTAL_KEY_VIEW)
 
@@ -142,7 +142,9 @@ void KeyConfigPrefs::Populate()
 
    mManager = project->GetCommandManager();
 
-   RefreshBindings();
+   // For speed, don't sort here.  We're just creating.
+   // Instead sort when we do SetView later in this function.
+   RefreshBindings(false);
 
    if (mViewByTree->GetValue()) {
       mViewType = ViewByTree;
@@ -294,7 +296,7 @@ void KeyConfigPrefs::PopulateOrExchange(ShuttleGui & S)
    Layout();
 }
 
-void KeyConfigPrefs::RefreshBindings()
+void KeyConfigPrefs::RefreshBindings(bool bSort)
 {
    wxArrayString Labels;
    wxArrayString Categories;
@@ -303,6 +305,7 @@ void KeyConfigPrefs::RefreshBindings()
    mNames.Clear();
    mKeys.Clear();
    mDefaultKeys.Clear();
+   mStandardDefaultKeys.Clear();
    mManager->GetAllCommandData(
       mNames,
       mKeys,
@@ -312,12 +315,17 @@ void KeyConfigPrefs::RefreshBindings()
       Prefixes,
       true); // True to include effects (list items), false otherwise.
 
+   mStandardDefaultKeys = mDefaultKeys;
+   FilterKeys( mStandardDefaultKeys );
+
    mView->RefreshBindings(mNames,
                           Categories,
                           Prefixes,
                           Labels,
-                          mKeys);
-   mView->ExpandAll();
+                          mKeys,
+                          bSort);
+   //Not needed as NEW nodes are already shown expanded.
+   //mView->ExpandAll();
 
    mNewKeys = mKeys;
 }
@@ -325,11 +333,10 @@ void KeyConfigPrefs::RefreshBindings()
 void KeyConfigPrefs::OnImport(wxCommandEvent & WXUNUSED(event))
 {
    wxString file = wxT("Audacity-keys.xml");
-   wxString path = gPrefs->Read(wxT("/DefaultOpenPath"),
-                                ::wxGetCwd());
 
-   file = FileSelector(_("Select an XML file containing Audacity keyboard shortcuts..."),
-                       path,
+   file = FileNames::SelectFile(FileNames::Operation::Open,
+                        _("Select an XML file containing Audacity keyboard shortcuts..."),
+                       wxEmptyString,
                        file,
                        wxT(""),
                        _("XML files (*.xml)|*.xml|All files|*"),
@@ -340,10 +347,6 @@ void KeyConfigPrefs::OnImport(wxCommandEvent & WXUNUSED(event))
       return;
    }
 
-   path = wxPathOnly(file);
-   gPrefs->Write(wxT("/DefaultOpenPath"), path);
-   gPrefs->Flush();
-
    XMLFileReader reader;
    if (!reader.Parse(mManager, file)) {
       wxMessageBox(reader.GetErrorStr(),
@@ -351,17 +354,16 @@ void KeyConfigPrefs::OnImport(wxCommandEvent & WXUNUSED(event))
                    wxOK | wxCENTRE, this);
    }
 
-   RefreshBindings();
+   RefreshBindings(true);
 }
 
 void KeyConfigPrefs::OnExport(wxCommandEvent & WXUNUSED(event))
 {
    wxString file = wxT("Audacity-keys.xml");
-   wxString path = gPrefs->Read(wxT("/DefaultExportPath"),
-                                ::wxGetCwd());
 
-   file = FileSelector(_("Export Keyboard Shortcuts As:"),
-                       path,
+   file = FileNames::SelectFile(FileNames::Operation::Export,
+                       _("Export Keyboard Shortcuts As:"),
+                       wxEmptyString,
                        file,
                        wxT("xml"),
                        _("XML files (*.xml)|*.xml|All files|*"),
@@ -372,35 +374,105 @@ void KeyConfigPrefs::OnExport(wxCommandEvent & WXUNUSED(event))
       return;
    }
 
-   path = wxPathOnly(file);
-   gPrefs->Write(wxT("/DefaultExportPath"), path);
-   gPrefs->Flush();
-
-   XMLFileWriter prefFile;
-
-   try
-   {
-      prefFile.Open(file, wxT("wb"));
+   GuardedCall< void >( [&] {
+      XMLFileWriter prefFile{ file, _("Error Exporting Keyboard Shortcuts") };
       mManager->WriteXML(prefFile);
-      prefFile.Close();
-   }
-   catch (const XMLFileWriterException &)
-   {
-      wxMessageBox(_("Couldn't write to file: ") + file,
-                   _("Error Exporting Keyboard Shortcuts"),
-                   wxOK | wxCENTRE, this);
+      prefFile.Commit();
+   } );
+}
+
+
+
+// There currently is only one clickable AButton
+// so we just do what it needs.
+void KeyConfigPrefs::OnDefaults(wxCommandEvent & event)
+{
+   wxMenu Menu;
+   Menu.Append( 1, _("Standard") );
+   Menu.Append( 2, _("Full") );
+   Menu.Bind( wxEVT_COMMAND_MENU_SELECTED, &KeyConfigPrefs::OnImportDefaults, this );
+   // Pop it up where the mouse is.
+   PopupMenu(&Menu);//, wxPoint(0, 0));
+}
+
+void KeyConfigPrefs::FilterKeys( wxArrayString & arr )
+{
+   wxSortedArrayString MaxListOnly;
+
+   // These short cuts are for the max list only....
+   //MaxListOnly.Add( "Ctrl+I" );
+   MaxListOnly.Add( "Ctrl+Alt+I" );
+   MaxListOnly.Add( "Ctrl+J" );
+   MaxListOnly.Add( "Ctrl+Alt+J" );
+   MaxListOnly.Add( "Ctrl+Alt+V" );
+   MaxListOnly.Add( "Alt+X" );
+   MaxListOnly.Add( "Alt+K" );
+   MaxListOnly.Add( "Shift+Alt+X" );
+   MaxListOnly.Add( "Shift+Alt+K" );
+   MaxListOnly.Add( "Alt+L" );
+   MaxListOnly.Add( "Shift+Alt+C" );
+   MaxListOnly.Add( "Alt+I" );
+   MaxListOnly.Add( "Alt+J" );
+   MaxListOnly.Add( "Shift+Alt+J" );
+   MaxListOnly.Add( "Ctrl+Shift+A" );
+   MaxListOnly.Add( "Q" );
+   //MaxListOnly.Add( "Shift+J" );
+   //MaxListOnly.Add( "Shift+K" );
+   //MaxListOnly.Add( "Shift+Home" );
+   //MaxListOnly.Add( "Shift+End" );
+   MaxListOnly.Add( "Ctrl+[" );
+   MaxListOnly.Add( "Ctrl+]" );
+   MaxListOnly.Add( "1" );
+   MaxListOnly.Add( "Shift+F5" );
+   MaxListOnly.Add( "Shift+F6" );
+   MaxListOnly.Add( "Shift+F7" );
+   MaxListOnly.Add( "Shift+F8" );
+   MaxListOnly.Add( "Ctrl+Shift+F5" );
+   MaxListOnly.Add( "Ctrl+Shift+F7" );
+   MaxListOnly.Add( "Ctrl+Shift+N" );
+   MaxListOnly.Add( "Ctrl+Shift+M" );
+   MaxListOnly.Add( "Ctrl+Home" );
+   MaxListOnly.Add( "Ctrl+End" );
+   MaxListOnly.Add( "Shift+C" );
+   MaxListOnly.Add( "Alt+Shift+Up" );
+   MaxListOnly.Add( "Alt+Shift+Down" );
+   MaxListOnly.Add( "Shift+P" );
+   MaxListOnly.Add( "Alt+Shift+Left" );
+   MaxListOnly.Add( "Alt+Shift+Right" );
+   MaxListOnly.Add( "Ctrl+Shift+T" );
+   //MaxListOnly.Add( "Command+M" );
+   //MaxListOnly.Add( "Option+Command+M" );
+   MaxListOnly.Add( "Shift+H" );
+   MaxListOnly.Add( "Shift+O" );
+   MaxListOnly.Add( "Shift+I" );
+   MaxListOnly.Add( "Shift+N" );
+   MaxListOnly.Add( "D" );
+   MaxListOnly.Add( "A" );
+   MaxListOnly.Add( "Alt+Shift+F6" );
+   MaxListOnly.Add( "Alt+F6" );
+
+   MaxListOnly.Sort();
+   // Remove items that are in MaxList.
+   for (size_t i = 0; i < arr.GetCount(); i++) {
+      if( MaxListOnly.Index( arr[i] ) != wxNOT_FOUND )
+         arr[i]= wxT("");
    }
 }
 
-void KeyConfigPrefs::OnDefaults(wxCommandEvent & WXUNUSED(event))
+void KeyConfigPrefs::OnImportDefaults(wxCommandEvent & event)
 {
+   gPrefs->DeleteEntry(wxT("/GUI/Shortcuts/FullDefaults"));
+   gPrefs->Flush();
+
    mNewKeys = mDefaultKeys;
+   if( event.GetId() == 1 )
+      FilterKeys( mNewKeys );
 
    for (size_t i = 0; i < mNewKeys.GetCount(); i++) {
       mManager->SetKeyFromIndex(i, mNewKeys[i]);
    }
 
-   RefreshBindings();
+   RefreshBindings(true);
 }
 
 void KeyConfigPrefs::OnHotkeyKeyDown(wxKeyEvent & e)
@@ -618,7 +690,7 @@ void KeyConfigPrefs::OnViewBy(wxCommandEvent & e)
    mFilter->SetName(wxStripMenuCodes(mFilterLabel->GetLabel()));
 }
 
-bool KeyConfigPrefs::Apply()
+bool KeyConfigPrefs::Commit()
 {
    // On the Mac, preferences may be changed without any active
    // projects.  This means that the CommandManager isn't availabe
@@ -633,7 +705,7 @@ bool KeyConfigPrefs::Apply()
    PopulateOrExchange(S);
 
    for (size_t i = 0; i < mNames.GetCount(); i++) {
-      wxString dkey = KeyStringNormalize(mDefaultKeys[i]);
+      wxString dkey = KeyStringNormalize(mStandardDefaultKeys[i]);
       wxString name = wxT("/NewKeys/") + mNames[i];
       wxString key = KeyStringNormalize(mNewKeys[i]);
 
@@ -663,6 +735,11 @@ void KeyConfigPrefs::Cancel()
    }
 
    return;
+}
+
+wxString KeyConfigPrefs::HelpPageName()
+{
+   return "Keyboard_Preferences";
 }
 
 #else
@@ -906,11 +983,10 @@ void KeyConfigPrefs::RepopulateBindingsList()
 void KeyConfigPrefs::OnImport(wxCommandEvent & WXUNUSED(event))
 {
    wxString file = wxT("Audacity-keys.xml");
-   wxString path = gPrefs->Read(wxT("/DefaultOpenPath"),
-                                ::wxGetCwd());
 
-   file = FileSelector(_("Select an XML file containing Audacity keyboard shortcuts..."),
-                       path,
+   file = FileNames::SelectFile(FileNames::Operation::Open,
+                       _("Select an XML file containing Audacity keyboard shortcuts..."),
+                       wxEmptyString,
                        file,
                        wxT(""),
                        _("XML files (*.xml)|*.xml|All files|*"),
@@ -920,10 +996,6 @@ void KeyConfigPrefs::OnImport(wxCommandEvent & WXUNUSED(event))
    if (!file) {
       return;
    }
-
-   path = wxPathOnly(file);
-   gPrefs->Write(wxT("/DefaultOpenPath"), path);
-   gPrefs->Flush();
 
    XMLFileReader reader;
    if (!reader.Parse(mManager, file)) {
@@ -938,10 +1010,9 @@ void KeyConfigPrefs::OnImport(wxCommandEvent & WXUNUSED(event))
 void KeyConfigPrefs::OnExport(wxCommandEvent & WXUNUSED(event))
 {
    wxString file = wxT("Audacity-keys.xml");
-   wxString path = gPrefs->Read(wxT("/DefaultExportPath"),
-                                ::wxGetCwd());
 
-   file = FileSelector(_("Export Keyboard Shortcuts As:"),
+   file = FileNames::SelectFile(FileNames::Operation::Export,
+                       _("Export Keyboard Shortcuts As:"),
                        path,
                        file,
                        wxT("xml"),
@@ -953,24 +1024,11 @@ void KeyConfigPrefs::OnExport(wxCommandEvent & WXUNUSED(event))
       return;
    }
 
-   path = wxPathOnly(file);
-   gPrefs->Write(wxT("/DefaultExportPath"), path);
-   gPrefs->Flush();
-
-   XMLFileWriter prefFile;
-
-   try
-   {
-      prefFile.Open(file, wxT("wb"));
+   GuardedCall< void >( [&] {
+      XMLFileWriter prefFile{ file, _("Error Exporting Keyboard Shortcuts") };
       mManager->WriteXML(prefFile);
-      prefFile.Close();
-   }
-   catch (const XMLFileWriterException &)
-   {
-      wxMessageBox(_("Couldn't write to file: ") + file,
-                   _("Error Exporting Keyboard Shortcuts"),
-                   wxOK | wxCENTRE, this);
-   }
+      prefFile.Commit();
+   } );
 }
 
 void KeyConfigPrefs::OnDefaults(wxCommandEvent & WXUNUSED(event))
@@ -1167,7 +1225,7 @@ void KeyConfigPrefs::OnItemSelected(wxListEvent & e)
    mKey->AppendText(item.GetText());
 }
 
-bool KeyConfigPrefs::Apply()
+bool KeyConfigPrefs::Commit()
 {
    for (size_t i = 0; i < mNames.GetCount(); i++) {
 //    wxString dkey = KeyStringNormalize(mManager->GetDefaultKeyFromName(mNames[i]));
@@ -1203,6 +1261,11 @@ void KeyConfigPrefs::Cancel()
    }
 
    return;
+}
+
+wxString KeyConfigPrefs::HelpPageName()
+{
+   return "Keyboard_Preferences";
 }
 
 #endif

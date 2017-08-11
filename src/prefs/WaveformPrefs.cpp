@@ -21,6 +21,7 @@ Paul Licameli
 #include <wx/checkbox.h>
 
 #include "../Project.h"
+
 #include "../TrackPanel.h"
 #include "../ShuttleGui.h"
 #include "../WaveTrack.h"
@@ -64,7 +65,7 @@ void WaveformPrefs::Populate()
 
    //------------------------- Main section --------------------
    // Now construct the GUI itself.
-   ShuttleGui S(this, eIsCreating);
+   ShuttleGui S(this, eIsCreatingFromPrefs);
    PopulateOrExchange(S);
    // ----------------------- End of main section --------------
 }
@@ -132,7 +133,7 @@ bool WaveformPrefs::Validate()
    return result;
 }
 
-bool WaveformPrefs::Apply()
+bool WaveformPrefs::Commit()
 {
    const bool isOpenPage = this->IsShown();
 
@@ -189,7 +190,7 @@ bool WaveformPrefs::Apply()
    return true;
 }
 
-bool WaveformPrefs::ShowsApplyButton()
+bool WaveformPrefs::ShowsPreviewButton()
 {
    return true;
 }

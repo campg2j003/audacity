@@ -44,9 +44,8 @@ class TipPanel;
 #define DB_SLIDER 2      // -36...36 dB
 #define PAN_SLIDER 3     // -1.0...1.0
 #define SPEED_SLIDER 4  // 0.01 ..3.0
-#ifdef EXPERIMENTAL_MIDI_OUT
+
 #define VEL_SLIDER 5    // -50..50
-#endif
 
 #define DB_MIN -36.0f
 #define DB_MAX 36.0f
@@ -131,9 +130,7 @@ class LWSlider
 
    float Get(bool convert = true);
    void Set(float value);
-#ifdef EXPERIMENTAL_MIDI_OUT
-   void SetStyle(int style);
-#endif
+
    void Increase(float steps);
    void Decrease(float steps);
 
@@ -145,7 +142,7 @@ class LWSlider
 
    void AdjustSize(const wxSize & sz);
 
-   void OnPaint(wxDC &dc);
+   void OnPaint(wxDC &dc, bool highlighted);
    void OnSize(wxSizeEvent & event);
    void OnMouseEvent(wxMouseEvent & event);
    void OnKeyEvent(wxKeyEvent & event);
@@ -158,6 +155,8 @@ class LWSlider
    bool GetEnabled();
 
    static void DeleteSharedTipPanel();
+
+   void SetParent(wxWindow *parent) { mParent = parent; }
 
  private:
 
@@ -233,12 +232,7 @@ class LWSlider
 
    bool mIsDragging;
 
-   std::unique_ptr<wxBitmap> mBitmap, mThumbBitmap;
-
-   // AD: True if this object owns *mThumbBitmap (sometimes mThumbBitmap points
-   // to an object we shouldn't DELETE) -- once we get theming totally right
-   // this should go away
-   bool mThumbBitmapAllocated;
+   std::unique_ptr<wxBitmap> mBitmap, mThumbBitmap, mThumbBitmapHilited;
 
    wxString mName;
 
@@ -274,9 +268,6 @@ class ASlider /* not final */ : public wxPanel
 
    float Get( bool convert = true );
    void Set(float value);
-#ifdef EXPERIMENTAL_MIDI_OUT
-   void SetStyle(int style);
-#endif
 
    void Increase(float steps);
    void Decrease(float steps);

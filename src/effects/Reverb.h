@@ -50,6 +50,7 @@ public:
 
    wxString GetSymbol() override;
    wxString GetDescription() override;
+   wxString ManualPage() override;
 
    // EffectIdentInterface implementation
 
@@ -97,7 +98,7 @@ private:
 
 private:
    unsigned mNumChans {};
-   Reverb_priv_t *mP;
+   ArrayOf<Reverb_priv_t> mP;
 
    Params mParams;
 

@@ -126,7 +126,7 @@ void ModulePrefs::PopulateOrExchange(ShuttleGui & S)
    S.EndStatic();
 }
 
-bool ModulePrefs::Apply()
+bool ModulePrefs::Commit()
 {
    ShuttleGui S(this, eIsSavingToPrefs);
    PopulateOrExchange(S);
@@ -159,6 +159,11 @@ void ModulePrefs::SetModuleStatus(const wxString &fname, int iStatus){
    PrefName = wxString( wxT("/ModulePath/") ) + ShortName.Lower();
    gPrefs->Write( PrefName, fname );
    gPrefs->Flush();
+}
+
+wxString ModulePrefs::HelpPageName()
+{
+   return "Modules_Preferences";
 }
 
 PrefsPanel *ModulePrefsFactory::Create(wxWindow *parent)

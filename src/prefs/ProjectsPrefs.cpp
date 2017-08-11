@@ -60,11 +60,11 @@ void ProjectsPrefs::PopulateOrExchange(ShuttleGui & S)
    {
       S.StartRadioButtonGroup(wxT("/FileFormats/SaveProjectWithDependencies"), wxT("ask"));
       {
-         S.TieRadioButton(_("&Always copy all audio into project (safest)"),
+         S.TieRadioButton(_("&Copy all audio into project (safest)"),
                           wxT("copy"));
          S.TieRadioButton(_("Do &not copy any audio"),
                           wxT("never"));
-         S.TieRadioButton(_("As&k user"),
+         S.TieRadioButton(_("As&k"),
                           wxT("ask"));
       }
       S.EndRadioButtonGroup();
@@ -72,12 +72,17 @@ void ProjectsPrefs::PopulateOrExchange(ShuttleGui & S)
    S.EndStatic();
 }
 
-bool ProjectsPrefs::Apply()
+bool ProjectsPrefs::Commit()
 {
    ShuttleGui S(this, eIsSavingToPrefs);
    PopulateOrExchange(S);
 
    return true;
+}
+
+wxString ProjectsPrefs::HelpPageName()
+{
+   return "Projects_Preferences";
 }
 
 PrefsPanel *ProjectsPrefsFactory::Create(wxWindow *parent)

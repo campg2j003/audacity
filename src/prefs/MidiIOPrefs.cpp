@@ -32,7 +32,7 @@ other settings.
 #include <wx/choice.h>
 #include <wx/intl.h>
 
-#include "portmidi.h"
+#include "../../lib-src/portmidi/pm_common/portmidi.h"
 
 #include "../AudioIO.h"
 #include "../Internat.h"
@@ -120,7 +120,7 @@ void MidiIOPrefs::PopulateOrExchange( ShuttleGui & S ) {
       {
          S.Id(HostID);
          /* i18n-hint: (noun) */
-         mHost = S.TieChoice(_("Host:"),
+         mHost = S.TieChoice(_("&Host:"),
                              wxT("/MidiIO/Host"),
                              wxT(""),
                              mHostNames,
@@ -138,12 +138,12 @@ void MidiIOPrefs::PopulateOrExchange( ShuttleGui & S ) {
       S.StartMultiColumn(2);
       {
          S.Id(PlayID);
-         mPlay = S.AddChoice(_("Device:"),
+         mPlay = S.AddChoice(_("&Device:"),
                              wxEmptyString,
                              &empty);
          int latency = gPrefs->Read(wxT("/MidiIO/OutputLatency"),
                                     DEFAULT_SYNTH_LATENCY);
-         mLatency = S.TieNumericTextBox(_("MIDI Synthesizer Latency (ms):"),
+         mLatency = S.TieNumericTextBox(_("MIDI Synth L&atency (ms):"),
                                         wxT("/MidiIO/SynthLatency"),
                                         latency, 3);
       }
@@ -156,13 +156,13 @@ void MidiIOPrefs::PopulateOrExchange( ShuttleGui & S ) {
       S.StartMultiColumn(2);
       {
          S.Id(RecordID);
-         mRecord = S.AddChoice(_("Device:"),
+         mRecord = S.AddChoice(_("De&vice:"),
                                wxEmptyString,
                                &empty);
 
          S.Id(ChannelsID);
          /*
-         mChannels = S.AddChoice(_("Channels:"),
+         mChannels = S.AddChoice(_("&Channels:"),
                                  wxEmptyString,
                                  &empty);
          */
@@ -175,8 +175,10 @@ void MidiIOPrefs::PopulateOrExchange( ShuttleGui & S ) {
 
 void MidiIOPrefs::OnHost(wxCommandEvent & e)
 {
+   wxString itemAtIndex;
    int index = mHost->GetCurrentSelection();
-   wxString itemAtIndex = mHostNames.Item(index);
+   if (index >= 0 && index < mHostNames.Count())
+      itemAtIndex = mHostNames.Item(index);
    int nDevices = Pm_CountDevices();
 
    if (nDevices == 0) {
@@ -248,7 +250,7 @@ void MidiIOPrefs::OnHost(wxCommandEvent & e)
 //   OnDevice(e);
 }
 
-bool MidiIOPrefs::Apply()
+bool MidiIOPrefs::Commit()
 {
    ShuttleGui S(this, eIsSavingToPrefs);
    PopulateOrExchange(S);
@@ -282,6 +284,11 @@ bool MidiIOPrefs::Validate()
       return false;
    }
    return true;
+}
+
+wxString MidiIOPrefs::HelpPageName()
+{
+   return "MIDI_Devices_Preferences";
 }
 
 PrefsPanel *MidiIOPrefsFactory::Create(wxWindow *parent)

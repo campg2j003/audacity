@@ -10,6 +10,7 @@
 // Objective-C++ .  Avoid mixing languages elsewhere.
 
 #include "Audacity.h"
+#include "AudacityApp.h"
 #include "Project.h"
 
 #undef USE_COCOA
@@ -90,10 +91,4 @@ void AudacityApp::MacActivateApp()
    id app = [NSApplication sharedApplication];
    if ( [app respondsToSelector:@selector(activateIgnoringOtherApps:)] )
       [app activateIgnoringOtherApps:YES];
-}
-
-bool AudacityApp::IsSierraOrLater()
-{
-   auto number = kCFCoreFoundationVersionNumber;
-   return number >= 1348.1;
 }

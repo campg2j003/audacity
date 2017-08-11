@@ -38,6 +38,11 @@ enum {
    ETBRedoID,
 
 #ifdef EXPERIMENTAL_SYNC_LOCK
+   //Undefined, so no sync-lock on/off button.
+   //#define OPTION_SYNC_LOCK_BUTTON
+#endif
+
+#ifdef OPTION_SYNC_LOCK_BUTTON
    ETBSyncLockID,
 #endif
 
@@ -56,6 +61,12 @@ enum {
 #endif
 
    ETBNumButtons
+};
+
+// flags so 1,2,4,8 etc.
+enum {
+   ETBActTooltips = 1,
+   ETBActEnableDisable = 2,
 };
 
 class EditToolBar final : public ToolBar {
@@ -84,6 +95,7 @@ class EditToolBar final : public ToolBar {
    void MakeButtons();
 
    void RegenerateTooltips() override;
+   void ForAllButtons(int Action);
 
    AButton *mButtons[ETBNumButtons];
 

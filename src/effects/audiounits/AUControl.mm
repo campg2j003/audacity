@@ -21,6 +21,7 @@
       
 **********************************************************************/
 
+#include "../../Audacity.h"
 #include <AudioUnit/AudioUnit.h>
 #include <AudioUnit/AudioComponent.h>
 #include <AudioUnit/AudioUnitProperties.h>
@@ -32,6 +33,7 @@
 #endif
 
 #include "AUControl.h"
+#include "../../MemoryX.h"
 
 @interface AUView : NSView
 {
@@ -106,11 +108,17 @@ AUControl::AUControl()
 
 AUControl::~AUControl()
 {
+   Close();
+}
+
+void AUControl::Close()
+{
 #if !defined(_LP64)
 
    if (mInstance)
    {
       AudioComponentInstanceDispose(mInstance);
+      mInstance = nullptr;
    }
 
 #endif
@@ -123,11 +131,13 @@ AUControl::~AUControl()
                       object:mView];
 
       [mView release];
+      mView = nullptr;
    }
 
    if (mAUView)
    {
       [mAUView release];
+      mAUView = nullptr;
    }
 }
 
@@ -173,7 +183,8 @@ bool AUControl::Create(wxWindow *parent, AudioComponent comp, AudioUnit unit, bo
       return false;
    }
 
-   SetPeer(new AUControlImpl(this, mAUView));
+   // wxWidgets takes ownership so safenew
+   SetPeer(safenew AUControlImpl(this, mAUView));
 
    if (mHIView)
    {
@@ -196,7 +207,7 @@ void AUControl::OnSize(wxSizeEvent & evt)
    {
       return;
    }
-   mSettingSize = true;
+   auto vr = valueRestorer( mSettingSize, true );
 
    wxSize sz = GetSize();
 
@@ -247,8 +258,6 @@ void AUControl::OnSize(wxSizeEvent & evt)
    }
 #endif
 
-   mSettingSize = false;
-
    return;
 }
 
@@ -274,7 +283,8 @@ void AUControl::CreateCocoa()
       return;
    }
 
-   AudioUnitCocoaViewInfo *viewInfo = (AudioUnitCocoaViewInfo *) malloc(dataSize);
+   ArrayOf<char> buffer{ dataSize };
+   auto viewInfo = (AudioUnitCocoaViewInfo *) buffer.get();
    if (viewInfo == NULL)
    {
       return;
@@ -327,8 +337,6 @@ void AUControl::CreateCocoa()
          CFRelease(viewInfo->mCocoaAUViewClass[i]);
       }
    }
-
-   free(viewInfo);
 
    if (!mView)
    {
@@ -416,6 +424,7 @@ void AUControl::CocoaViewResized()
    {
       return;
    }
+   auto vr = valueRestorer( mSettingSize, true );
 
    NSSize viewSize = [mView frame].size;
    NSSize frameSize = [mAUView frame].size;
@@ -471,7 +480,8 @@ void AUControl::CreateCarbon()
       return;
    }
 
-   AudioComponentDescription *compList = (AudioComponentDescription *) malloc(dataSize);
+   ArrayOf<char> buffer{ dataSize };
+   auto compList = (AudioComponentDescription *) buffer.get();
    if (compList == NULL)
    {
       return;
@@ -485,20 +495,13 @@ void AUControl::CreateCarbon()
                                  compList,
                                  &dataSize);
    if (result != noErr)
-   {
-      free(compList);
-
       return;
-   }
 
    // Get the component
    AudioComponent comp = AudioComponentFindNext(NULL, &compList[0]);
 
    // Try to create an instance
    result = AudioComponentInstanceNew(comp, &mInstance);
-
-   // Done with the list
-   free(compList);
 
    if (result != noErr)
    {
@@ -628,7 +631,8 @@ void AUControl::CarbonViewResized()
    {
       return;
    }
-   
+   auto vr = valueRestorer( mSettingSize, true );
+
    // resize and move window
    HIRect rect;
    HIViewGetFrame(mHIView, &rect);
@@ -651,7 +655,7 @@ void AUControl::CarbonViewResized()
    // Set the dialog size
    w->SetSize(size);
 
-   // And finally set the new max/min
+   // And finally set the NEW max/min
    w->SetSizeHints(size, size);
 
    mLastMin = wxSize(rect.size.width, rect.size.height);

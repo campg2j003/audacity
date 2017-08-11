@@ -69,6 +69,7 @@
 #include "../widgets/Warning.h"
 #include "../AColor.h"
 #include "../Dependencies.h"
+#include "../FileNames.h"
 
 //----------------------------------------------------------------------------
 // ExportPlugin
@@ -240,12 +241,14 @@ wxWindow *ExportPlugin::OptionsCreate(wxWindow *parent, int WXUNUSED(format))
 std::unique_ptr<Mixer> ExportPlugin::CreateMixer(const WaveTrackConstArray &inputTracks,
          const TimeTrack *timeTrack,
          double startTime, double stopTime,
-         unsigned numOutChannels, int outBufferSize, bool outInterleaved,
+         unsigned numOutChannels, size_t outBufferSize, bool outInterleaved,
          double outRate, sampleFormat outFormat,
          bool highQuality, MixerSpec *mixerSpec)
 {
    // MB: the stop time should not be warped, this was a bug.
    return std::make_unique<Mixer>(inputTracks,
+                  // Throw, to stop exporting, if read fails:
+                  true,
                   Mixer::WarpOptions(timeTrack),
                   startTime, stopTime,
                   numOutChannels, outBufferSize, outInterleaved,
@@ -423,7 +426,9 @@ bool Exporter::ExamineTracks()
 
    while (tr) {
       if (tr->GetKind() == Track::Wave) {
-         if ( (tr->GetSelected() || !mSelectedOnly) && !tr->GetMute() ) {  // don't count muted tracks
+         auto wt = static_cast<const WaveTrack *>(tr);
+         if ( (tr->GetSelected() || !mSelectedOnly) &&
+              !wt->GetMute() ) {  // don't count muted tracks
             mNumSelected++;
 
             if (tr->GetChannel() == Track::LeftChannel) {
@@ -517,52 +522,49 @@ bool Exporter::GetFilename()
       mFilterIndex = 0;
    }
    maskString.RemoveLast();
+   wxString defext = mPlugins[mFormat]->GetExtension(mSubFormat).Lower();
 
 //Bug 1304: Set a default path if none was given.  For Export.
-#ifdef __WIN32__
-   wxFileName tmpFile;
-   tmpFile.AssignHomeDir();
-   wxString tmpDirLoc = tmpFile.GetPath(wxPATH_GET_VOLUME);
-   mFilename.SetPath(gPrefs->Read(wxT("/Export/Path"), tmpDirLoc + "\\Documents\\Audacity"));
-   // The path might not exist.
-   // There is no error if the path could not be created.  That's OK.
-   // The dialog that Audacity offers will allow the user to select a valid directory.
-   mFilename.Mkdir(0755, wxPATH_MKDIR_FULL);
-#else
-   mFilename.SetPath(gPrefs->Read(wxT("/Export/Path"), wxT("~/Documents")));
-#endif
+   mFilename = FileNames::DefaultToDocumentsFolder(wxT("/Export/Path"));
    mFilename.SetName(mProject->GetName());
+   if (mFilename.GetName().empty())
+      mFilename.SetName(_("untitled"));
    while (true) {
       // Must reset each iteration
       mBook = NULL;
 
-      FileDialog fd(mProject,
-                    mFileDialogTitle,
-                    mFilename.GetPath(),
-                    mFilename.GetFullName(),
-                    maskString,
-                    wxFD_SAVE | wxRESIZE_BORDER);
-      mDialog = &fd;
-      mDialog->PushEventHandler(this);
+      {
+         auto useFileName = mFilename;
+         if (!useFileName.HasExt())
+            useFileName.SetExt(defext);
+         FileDialog fd(mProject,
+                       mFileDialogTitle,
+                       mFilename.GetPath(),
+                       useFileName.GetFullName(),
+                       maskString,
+                       wxFD_SAVE | wxRESIZE_BORDER);
+         mDialog = &fd;
+         mDialog->PushEventHandler(this);
 
-      fd.SetUserPaneCreator(CreateUserPaneCallback, (wxUIntPtr) this);
-      fd.SetFilterIndex(mFilterIndex);
+         fd.SetUserPaneCreator(CreateUserPaneCallback, (wxUIntPtr) this);
+         fd.SetFilterIndex(mFilterIndex);
 
-      int result = fd.ShowModal();
+         int result = fd.ShowModal();
 
-      mDialog->PopEventHandler();
+         mDialog->PopEventHandler();
 
-      if (result == wxID_CANCEL) {
-         return false;
+         if (result == wxID_CANCEL) {
+            return false;
+         }
+
+         mFilename = fd.GetPath();
+         if (mFilename == wxT("")) {
+            return false;
+         }
+
+         mFormat = fd.GetFilterIndex();
+         mFilterIndex = fd.GetFilterIndex();
       }
-
-      mFilename = fd.GetPath();
-      if (mFilename == wxT("")) {
-         return false;
-      }
-
-      mFormat = fd.GetFilterIndex();
-      mFilterIndex = fd.GetFilterIndex();
 
       int c = 0;
       int i = -1;
@@ -581,7 +583,7 @@ bool Exporter::GetFilename()
       }
 
       wxString ext = mFilename.GetExt();
-      wxString defext = mPlugins[mFormat]->GetExtension(mSubFormat).Lower();
+      defext = mPlugins[mFormat]->GetExtension(mSubFormat).Lower();
 
       //
       // Check the extension - add the default if it's not there,
@@ -822,14 +824,27 @@ bool Exporter::CheckMix()
 
 bool Exporter::ExportTracks()
 {
-   int success;
-
    // Keep original in case of failure
    if (mActualName != mFilename) {
       ::wxRenameFile(mActualName.GetFullPath(), mFilename.GetFullPath());
    }
 
-   success = mPlugins[mFormat]->Export(mProject,
+   bool success = false;
+
+   auto cleanup = finally( [&] {
+      if (mActualName != mFilename) {
+         // Remove backup
+         if ( success )
+            ::wxRemoveFile(mFilename.GetFullPath());
+         else {
+            // Restore original, if needed
+            ::wxRemoveFile(mActualName.GetFullPath());
+            ::wxRenameFile(mFilename.GetFullPath(), mActualName.GetFullPath());
+         }
+      }
+   } );
+
+   auto result = mPlugins[mFormat]->Export(mProject,
                                        mChannels,
                                        mActualName.GetFullPath(),
                                        mSelectedOnly,
@@ -839,19 +854,10 @@ bool Exporter::ExportTracks()
                                        NULL,
                                        mSubFormat);
 
-   if (mActualName != mFilename) {
-      // Remove backup
-      if (success == eProgressSuccess || success == eProgressStopped) {
-         ::wxRemoveFile(mFilename.GetFullPath());
-      }
-      else {
-         // Restore original, if needed
-         ::wxRemoveFile(mActualName.GetFullPath());
-         ::wxRenameFile(mFilename.GetFullPath(), mActualName.GetFullPath());
-      }
-   }
+   success =
+      result == ProgressResult::Success || result == ProgressResult::Stopped;
 
-   return (success == eProgressSuccess || success == eProgressStopped);
+   return success;
 }
 
 void Exporter::CreateUserPaneCallback(wxWindow *parent, wxUIntPtr userdata)
@@ -998,23 +1004,20 @@ ExportMixerPanel::ExportMixerPanel( MixerSpec *mixerSpec,
       wxArrayString trackNames,wxWindow *parent, wxWindowID id,
       const wxPoint& pos, const wxSize& size):
    wxPanelWrapper(parent, id, pos, size)
+   , mMixerSpec{mixerSpec}
+   , mChannelRects{ mMixerSpec->GetMaxNumChannels() }
+   , mTrackRects{ mMixerSpec->GetNumTracks() }
 {
    mBitmap = NULL;
    mWidth = 0;
    mHeight = 0;
-   mMixerSpec = mixerSpec;
    mSelectedTrack = mSelectedChannel = -1;
-
-   mTrackRects = new wxRect[ mMixerSpec->GetNumTracks() ];
-   mChannelRects = new wxRect[ mMixerSpec->GetMaxNumChannels() ];
 
    mTrackNames = trackNames;
 }
 
 ExportMixerPanel::~ExportMixerPanel()
 {
-   delete[] mTrackRects;
-   delete[] mChannelRects;
 }
 
 //set the font on memDC such that text can fit in specified width and height
@@ -1252,7 +1255,9 @@ ExportMixerDialog::ExportMixerDialog( const TrackList *tracks, bool selectedOnly
 
    for( const Track *t = iter.First(); t; t = iter.Next() )
    {
-      if( t->GetKind() == Track::Wave && ( t->GetSelected() || !selectedOnly ) && !t->GetMute() )
+      auto wt = static_cast<const WaveTrack *>(t);
+      if( t->GetKind() == Track::Wave && ( t->GetSelected() || !selectedOnly ) &&
+         !wt->GetMute() )
       {
          numTracks++;
          const wxString sTrackName = (t->GetName()).Left(20);
@@ -1319,6 +1324,7 @@ ExportMixerDialog::ExportMixerDialog( const TrackList *tracks, bool selectedOnly
    SetSizeHints( 640, 480, 20000, 20000 );
 
    SetSize( 640, 480 );
+   Center();
 }
 
 ExportMixerDialog::~ExportMixerDialog()

@@ -40,9 +40,9 @@
 
 #include "../Audacity.h"
 #include "Meter.h"
-#include "../AudacityApp.h"
 
 #include <algorithm>
+#include <wx/app.h>
 #include <wx/defs.h>
 #include <wx/dialog.h>
 #include <wx/dcbuffer.h>
@@ -113,17 +113,15 @@ wxString MeterUpdateMsg::toStringIfClipped()
 // without needing mutexes.
 //
 
-MeterUpdateQueue::MeterUpdateQueue(int maxLen):
+MeterUpdateQueue::MeterUpdateQueue(size_t maxLen):
    mBufferSize(maxLen)
 {
-   mBuffer = new MeterUpdateMsg[mBufferSize];
    Clear();
 }
 
 // destructor
 MeterUpdateQueue::~MeterUpdateQueue()
 {
-   delete[] mBuffer;
 }
 
 void MeterUpdateQueue::Clear()
@@ -258,11 +256,11 @@ Meter::Meter(AudacityProject *project,
    mRuler.SetFonts(GetFont(), GetFont(), GetFont());
    mRuler.SetFlip(mStyle != MixerTrackCluster);
    mRuler.SetLabelEdges(true);
+   //mRuler.SetTickColour( wxColour( 0,0,255 ) );
 
    UpdatePrefs();
 
-   wxColour backgroundColour =
-      wxSystemSettings::GetColour(wxSYS_COLOUR_3DFACE);
+   wxColour backgroundColour = theTheme.Colour( clrMedium);
    mBkgndBrush = wxBrush(backgroundColour, wxSOLID);
 
    mPeakPeakPen = wxPen(theTheme.Colour( clrMeterPeak),        1, wxSOLID);
@@ -316,12 +314,12 @@ Meter::Meter(AudacityProject *project,
    {
       if(mIsInput)
       {
-         //mIcon = new wxBitmap(MicMenuNarrow_xpm);
+         //mIcon = NEW wxBitmap(MicMenuNarrow_xpm);
          mIcon = std::make_unique<wxBitmap>(wxBitmap(theTheme.Bitmap(bmpMic)));
       }
       else
       {
-         //mIcon = new wxBitmap(SpeakerMenuNarrow_xpm);
+         //mIcon = NEW wxBitmap(SpeakerMenuNarrow_xpm);
          mIcon = std::make_unique<wxBitmap>(wxBitmap(theTheme.Bitmap(bmpSpeaker)));
       }
    }
@@ -370,7 +368,8 @@ Meter::~Meter()
    // LLL:  This prevents a crash during termination if monitoring
    //       is active.
    if (gAudioIO && gAudioIO->IsMonitoring())
-      gAudioIO->StopStream();
+      if( gAudioIO->GetCaptureMeter() == this )
+         gAudioIO->StopStream();
 }
 
 void Meter::UpdatePrefs()
@@ -430,6 +429,8 @@ void Meter::OnPaint(wxPaintEvent & WXUNUSED(event))
    std::unique_ptr<wxDC> paintDC{ wxAutoBufferedPaintDCFactory(this) };
 #endif
    wxDC & destDC = *paintDC;
+   wxColour clrText = theTheme.Colour( clrTrackPanelText );
+   wxColour clrBoxFill = theTheme.Colour( clrMedium );
 
    if (mLayoutValid == false)
    {
@@ -444,33 +445,30 @@ void Meter::OnPaint(wxPaintEvent & WXUNUSED(event))
    
       // Start with a clean background
       // LLL:  Should research USE_AQUA_THEME usefulness...
-#ifndef USE_AQUA_THEME
+//#ifndef USE_AQUA_THEME
 #ifdef EXPERIMENTAL_THEMING
-      if( !mMeterDisabled )
-      {
-         mBkgndBrush.SetColour( GetParent()->GetBackgroundColour() );
-      }
+      //if( !mMeterDisabled )
+      //{
+      //   mBkgndBrush.SetColour( GetParent()->GetBackgroundColour() );
+      //}
 #endif
    
       dc.SetPen(*wxTRANSPARENT_PEN);
       dc.SetBrush(mBkgndBrush);
       dc.DrawRectangle(0, 0, mWidth, mHeight);
-#endif
+//#endif
 
       // MixerTrackCluster style has no icon or L/R labels
       if (mStyle != MixerTrackCluster)
       {
          bool highlight = InIcon();
-         if (highlight) {
-            auto rect = mIconRect;
-            rect.Inflate(gap, gap);
-            wxColour colour(247, 247, 247);
-            dc.SetBrush(colour);
-            dc.SetPen(colour	);
-            dc.DrawRectangle(rect);
-         }
+         dc.DrawBitmap( theTheme.Bitmap( highlight ? bmpHiliteButtonSmall : bmpUpButtonSmall ), 
+            mIconRect.GetPosition(), false );
+
          dc.DrawBitmap(*mIcon, mIconRect.GetPosition(), true);
          dc.SetFont(GetFont());
+         dc.SetTextForeground( clrText );
+         dc.SetTextBackground( clrBoxFill );
          dc.DrawText(mLeftText, mLeftTextPos.x, mLeftTextPos.y);
          dc.DrawText(mRightText, mRightTextPos.x, mRightTextPos.y);
       }
@@ -571,9 +569,12 @@ void Meter::OnPaint(wxPaintEvent & WXUNUSED(event))
 #endif
          }
       }
-   
+      mRuler.SetTickColour( clrText );
+      dc.SetTextForeground( clrText );
       // Draw the ruler
-      mRuler.Draw(dc);   
+#ifndef EXPERIMENTAL_DA
+      mRuler.Draw(dc);
+#endif
 
       // Bitmap created...unselect
       dc.SelectObject(wxNullBitmap);
@@ -588,11 +589,24 @@ void Meter::OnPaint(wxPaintEvent & WXUNUSED(event))
       DrawMeterBar(destDC, &mBar[i]);
    }
 
+   destDC.SetTextForeground( clrText );
+
+#ifndef EXPERIMENTAL_DA
    // We can have numbers over the bars, in which case we have to draw them each time.
    if (mStyle == HorizontalStereoCompact || mStyle == VerticalStereoCompact)
    {
+      mRuler.SetTickColour( clrText );
+      // If the text colour is too similar to the meter colour, then we need a background
+      // for the text.  We require a total of at least one full-scale RGB difference.
+      int d = theTheme.ColourDistance( clrText, theTheme.Colour( clrMeterOutputRMSBrush ) );
+      if( d < 256 )
+      {
+         destDC.SetBackgroundMode( wxSOLID );
+         destDC.SetTextBackground( clrBoxFill );
+      }
       mRuler.Draw(destDC);
    }
+#endif
 
    // Let the user know they can click to start monitoring
    if( mIsInput && !mActive )
@@ -621,11 +635,12 @@ void Meter::OnPaint(wxPaintEvent & WXUNUSED(event))
                            Siz.GetHeight(),
                            Siz.GetWidth() );
 
-               destDC.SetBrush( *wxWHITE_BRUSH );
-               destDC.SetPen( *wxGREY_PEN );
+               destDC.SetBrush( wxBrush( clrBoxFill ) );
+               destDC.SetPen( *wxWHITE_PEN );
                destDC.DrawRectangle( r );
                destDC.SetBackgroundMode( wxTRANSPARENT );
                r.SetTop( r.GetBottom() + (gap / 2) );
+               destDC.SetTextForeground( clrText );
                destDC.DrawRotatedText( Text, r.GetPosition(), 90 );
                break;
             }
@@ -639,12 +654,13 @@ void Meter::OnPaint(wxPaintEvent & WXUNUSED(event))
                          Siz.GetWidth(),
                          Siz.GetHeight() );
 
-               destDC.SetBrush( *wxWHITE_BRUSH );
-               destDC.SetPen( *wxGREY_PEN );
+               destDC.SetBrush( wxBrush( clrBoxFill ) );
+               destDC.SetPen( *wxWHITE_PEN );
                destDC.DrawRectangle( r );
                destDC.SetBackgroundMode( wxTRANSPARENT );
                r.SetLeft( r.GetLeft() + (gap / 2) );
                r.SetTop( r.GetTop() + (gap / 2));
+               destDC.SetTextForeground( clrText );
                destDC.DrawText( Text, r.GetPosition() );
                break;
             }
@@ -1399,8 +1415,8 @@ void Meter::HandleLayout(wxDC &dc)
       mRuler.OfflimitsPixels(0, 0);
       break;
    case HorizontalStereo:
-      // Ensure there's a margin between left edge of window and items
-      left = gap;
+      // Button right next to dragger.
+      left = 0;
 
       // Add a gap between bottom of icon and bottom of window
       height -= gap;
@@ -1410,6 +1426,7 @@ void Meter::HandleLayout(wxDC &dc)
       mIconRect.SetY(height - iconHeight);
       mIconRect.SetWidth(iconWidth);
       mIconRect.SetHeight(iconHeight);
+      left = gap;
 
       // Make sure there's room for icon and gap between the bottom of the meter and icon
       height -= iconHeight + gap;
@@ -1454,15 +1471,16 @@ void Meter::HandleLayout(wxDC &dc)
       mRuler.OfflimitsPixels(0, mIconRect.GetRight() - 4);
       break;
    case HorizontalStereoCompact:
-      // Ensure there's a margin between left edge of window and items
-      left = gap;
+      // Button right next to dragger.
+      left = 0;
 
       // Create icon rectangle
       mIconRect.SetX(left);
-      mIconRect.SetY((height - iconHeight) / 2);
+      mIconRect.SetY((height - iconHeight) / 2 -1);
       mIconRect.SetWidth(iconWidth);
       mIconRect.SetHeight(iconHeight);
 
+      left = gap;
       // Add width of icon and gap between icon and L/R
       left += iconWidth + gap;
 
@@ -1813,71 +1831,53 @@ void Meter::StartMonitoring()
    }
 }
 
+void Meter::StopMonitoring(){
+   mMonitoring = false;
+   if (gAudioIO->IsMonitoring()){
+      gAudioIO->StopStream();
+   } 
+}
+
 void Meter::OnAudioIOStatus(wxCommandEvent &evt)
 {
    evt.Skip();
-
    AudacityProject *p = (AudacityProject *) evt.GetEventObject();
 
-   mActive = false;
-   if (evt.GetInt() != 0)
-   {
-      if (p == mProject)
-      {
-         mActive = true;
+   mActive = (evt.GetInt() != 0) && (p == mProject);
 
-         mTimer.Start(1000 / mMeterRefreshRate);
-
-         if (evt.GetEventType() == EVT_AUDIOIO_MONITOR)
-         {
-            mMonitoring = mActive;
-         }
-      }
-      else
-      {
-         mTimer.Stop();
-
-         mMonitoring = false;
-      }
-   }
-   else
-   {
+   if( mActive ){
+      mTimer.Start(1000 / mMeterRefreshRate);
+      if (evt.GetEventType() == EVT_AUDIOIO_MONITOR)
+         mMonitoring = mActive;
+   } else {
       mTimer.Stop();
-
       mMonitoring = false;
    }
 
    // Only refresh is we're the active meter
    if (IsShownOnScreen())
-   {
       Refresh(false);
-   }
 }
 
 // SaveState() and RestoreState() exist solely for purpose of recreating toolbars
 // They should really be quering the project for current audio I/O state, but there
 // isn't a clear way of doing that just yet.  (It should NOT query AudioIO.)
-void *Meter::SaveState()
+auto Meter::SaveState() -> State
 {
-   bool *state = new bool[2];
-   state[0] = mMonitoring;
-   state[1] = mActive;
-
-   return state;
+   return { true, mMonitoring, mActive };
 }
 
-void Meter::RestoreState(void *state)
+void Meter::RestoreState(const State &state)
 {
-   bool *s = (bool *)state;
-   mMonitoring = s[0];
-   mActive = s[1];
+   if (!state.mSaved)
+      return;
+
+   mMonitoring = state.mMonitoring;
+   mActive = state.mActive;
+   //wxLogDebug("Restore state for %p, is %i", this, mActive );
 
    if (mActive)
-   {
       mTimer.Start(1000 / mMeterRefreshRate);
-   }
-
-   delete [] s;
 }
 
 //
@@ -2303,8 +2303,6 @@ wxAccStatus MeterAx::GetState(int WXUNUSED(childId), long* state)
 
    *state = wxACC_STATE_SYSTEM_FOCUSABLE;
 
-   // Do not use mButtonIsFocused is not set until after this method
-   // is called.
    *state |= ( m == wxWindow::FindFocus() ? wxACC_STATE_SYSTEM_FOCUSED : 0 );
 
    return wxACC_OK;

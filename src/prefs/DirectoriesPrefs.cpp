@@ -256,12 +256,17 @@ bool DirectoriesPrefs::Validate()
    return true;
 }
 
-bool DirectoriesPrefs::Apply()
+bool DirectoriesPrefs::Commit()
 {
    ShuttleGui S(this, eIsSavingToPrefs);
    PopulateOrExchange(S);
 
    return true;
+}
+
+wxString DirectoriesPrefs::HelpPageName()
+{
+   return "Directories_Preferences";
 }
 
 PrefsPanel *DirectoriesPrefsFactory::Create(wxWindow *parent)

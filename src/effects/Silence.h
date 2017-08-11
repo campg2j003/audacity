@@ -31,6 +31,7 @@ public:
 
    wxString GetSymbol() override;
    wxString GetDescription() override;
+   wxString ManualPage() override;
 
    // EffectIdentInterface implementation
 
@@ -45,7 +46,7 @@ public:
 protected:
    // Generator implementation
 
-   bool GenerateTrack(WaveTrack *tmp, const WaveTrack &track, int ntrack);
+   bool GenerateTrack(WaveTrack *tmp, const WaveTrack &track, int ntrack) override;
 
 private:
    NumericTextCtrl *mDurationT;

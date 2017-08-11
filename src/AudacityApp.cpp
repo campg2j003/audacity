@@ -60,6 +60,7 @@ It handles initialization and termination by subclassing wxApp.
 #include <sys/stat.h>
 #endif
 
+#include "AudacityException.h"
 #include "AudacityLogger.h"
 #include "AboutDialog.h"
 #include "AColor.h"
@@ -197,7 +198,7 @@ It handles initialization and termination by subclassing wxApp.
 #     pragma comment(lib, "libvamp")
 #  endif
 
-#  if defined(__WXDEBUG__)
+#  if defined(_DEBUG)
 #     define D "d"
 #  else
 #     define D ""
@@ -228,7 +229,13 @@ It handles initialization and termination by subclassing wxApp.
 
 #endif //(__WXMSW__)
 
+// DA: Logo for Splash Screen
+#ifdef EXPERIMENTAL_DA
+#include "../images/DarkAudacityLogoWithName.xpm"
+#else
 #include "../images/AudacityLogoWithName.xpm"
+#endif
+
 
 ////////////////////////////////////////////////////////////
 /// Custom events
@@ -521,7 +528,7 @@ class GnomeShutdown
  public:
    GnomeShutdown()
    {
-      mArgv[0] = strdup("Audacity");
+      mArgv[0].reset(strdup("Audacity"));
 
       mGnomeui = dlopen("libgnomeui-2.so.0", RTLD_NOW);
       if (!mGnomeui) {
@@ -550,11 +557,11 @@ class GnomeShutdown
          return;
       }
 
-      gnome_program_init(mArgv[0],
+      gnome_program_init(mArgv[0].get(),
                          "1.0",
                          libgnomeui_module_info_get(),
                          1,
-                         mArgv,
+                         reinterpret_cast<char**>(mArgv),
                          NULL);
 
       mClient = gnome_master_client();
@@ -568,13 +575,11 @@ class GnomeShutdown
    virtual ~GnomeShutdown()
    {
       // Do not dlclose() the libraries here lest you want segfaults...
-
-      free(mArgv[0]);
    }
 
  private:
 
-   char *mArgv[1];
+   MallocString<> mArgv[1];
    void *mGnomeui;
    void *mGnome;
    GnomeClient *mClient;
@@ -646,54 +651,12 @@ public:
 };
 
 #if defined(__WXMAC__)
-// This should be removed when Lame and FFmpeg support is converted
-// from loadable libraries to commands.
-//
-// The purpose of this is to give the user more control over where libraries
-// such as Lame and FFmpeg get loaded from.
-//
-// Since absolute pathnames are used when loading these libraries, the normal search
-// path would be DYLD_LIBRARY_PATH, absolute path, DYLD_FALLBACK_LIBRARY_PATH.  This
-// means that DYLD_LIBRARY_PATH can override what the user actually wants.
-//
-// So, we simply clear DYLD_LIBRARY_PATH to allow the users choice to be the first
-// one tried.
+
 IMPLEMENT_APP_NO_MAIN(AudacityApp)
 IMPLEMENT_WX_THEME_SUPPORT
 
 int main(int argc, char *argv[])
 {
-   bool doCrash = false;
-
-#ifdef FIX_BUG1567
-   doCrash = AudacityApp::IsSierraOrLater();
-#endif
-
-   bool doExec = !doCrash && getenv("DYLD_LIBRARY_PATH");
-   unsetenv("DYLD_LIBRARY_PATH");
-
-   extern char **environ;
-   
-#ifdef FIX_BUG1567
-   const char *var_name = "_NO_CRASH";
-   if ( doCrash && !( getenv( var_name ) ) ) {
-      setenv(var_name, "1", TRUE);
-      // Bizarre fix for Bug1567
-      // Crashing one Audacity and immediately starting another avoids intermittent
-      // failures to load libraries on Sierra
-      if ( fork() )
-         // The original process crashes at once
-         raise(SIGTERM);
-
-      // Child process can't proceed until doing this:
-      execve(argv[0], argv, environ);
-   }
-   else
-#else
-      if (doExec)
-         execve(argv[0], argv, environ);
-#endif
-
    wxDISABLE_DEBUG_SUPPORT();
 
    return wxEntry(argc, argv);
@@ -811,9 +774,7 @@ bool AudacityApp::MRUOpen(const wxString &fullPathStr) {
       // verify that the file exists
       if (wxFile::Exists(fullPathStr))
       {
-         if (!gPrefs->Write(wxT("/DefaultOpenPath"), wxPathOnly(fullPathStr)) ||
-               !gPrefs->Flush())
-            return false;
+         FileNames::UpdateDefaultPath(FileNames::Operation::Open, fullPathStr);
 
          // Make sure it isn't already open.
          // Test here even though AudacityProject::OpenFile() also now checks, because
@@ -832,13 +793,12 @@ bool AudacityApp::MRUOpen(const wxString &fullPathStr) {
          // there are no tracks, but there's an Undo history, etc, then
          // bad things can happen, including data files moving to the NEW
          // project directory, etc.
-         if (!proj || proj->GetDirty() || !proj->GetIsEmpty()) {
-            proj = CreateNewAudacityProject();
-         }
+         if (proj && (proj->GetDirty() || !proj->GetIsEmpty()))
+            proj = nullptr;
          // This project is clean; it's never been touched.  Therefore
          // all relevant member variables are in their initial state,
          // and it's okay to open a NEW project inside this window.
-         proj->OpenFile(fullPathStr);
+         AudacityProject::OpenProject( proj, fullPathStr );
       }
       else {
          // File doesn't exist - remove file from history
@@ -848,6 +808,11 @@ bool AudacityApp::MRUOpen(const wxString &fullPathStr) {
       }
    }
    return(true);
+}
+
+bool AudacityApp::SafeMRUOpen(const wxString &fullPathStr)
+{
+   return GuardedCall< bool >( [&]{ return MRUOpen( fullPathStr ); } );
 }
 
 void AudacityApp::OnMRUClear(wxCommandEvent& WXUNUSED(event))
@@ -867,13 +832,16 @@ void AudacityApp::OnMRUFile(wxCommandEvent& event) {
    // because we don't want to RemoveFileFromHistory() just because it already exists,
    // and AudacityApp::OnMacOpenFile() calls MRUOpen() directly.
    // that method does not return the bad result.
+   // PRL: Don't call SafeMRUOpen
+   // -- if open fails for some exceptional reason of resource exhaustion that
+   // the user can correct, leave the file in history.
    if (!AudacityProject::IsAlreadyOpen(fullPathStr) && !MRUOpen(fullPathStr))
       mRecentFiles->RemoveFileFromHistory(n);
 }
 
 void AudacityApp::OnTimer(wxTimerEvent& WXUNUSED(event))
 {
-   // Filenames are queued when Audacity receives the a few of the
+   // Filenames are queued when Audacity receives a few of the
    // AppleEvent messages (via wxWidgets).  So, open any that are
    // in the queue and clean the queue.
    if (gInited) {
@@ -902,7 +870,9 @@ void AudacityApp::OnTimer(wxTimerEvent& WXUNUSED(event))
             // LL:  In all but one case an appropriate message is already displayed.  The
             //      instance that a message is NOT displayed is when a failure to write
             //      to the config file has occurred.
-            if (!MRUOpen(name)) {
+            // PRL: Catch any exceptions, don't try this file again, continue to
+            // other files.
+            if (!SafeMRUOpen(name)) {
                wxFAIL_MSG(wxT("MRUOpen failed"));
             }
          }
@@ -914,13 +884,12 @@ void AudacityApp::OnTimer(wxTimerEvent& WXUNUSED(event))
       // find which project owns the blockfile
       // note: there may be more than 1, but just go with the first one.
       //size_t numProjects = gAudacityProjects.size();
-      AudacityProject *offendingProject {};
+      AProjectHolder offendingProject;
       wxString missingFileName;
 
       {
          ODLocker locker { &m_LastMissingBlockFileLock };
-         offendingProject =
-            AProjectHolder{ m_LastMissingBlockFileProject }.get();
+         offendingProject = m_LastMissingBlockFileProject.lock();
          missingFileName = m_LastMissingBlockFilePath;
       }
 
@@ -944,7 +913,7 @@ locations of the missing files."), missingFileName.c_str());
          if (offendingProject->GetMissingAliasFileDialog()) {
             offendingProject->GetMissingAliasFileDialog()->Raise();
          } else {
-            ShowAliasMissingDialog(offendingProject, _("Files Missing"),
+            ShowAliasMissingDialog(offendingProject.get(), _("Files Missing"),
                                    errorMessage, wxT(""), true);
          }
       }
@@ -1087,6 +1056,47 @@ void AudacityApp::OnFatalException()
    exit(-1);
 }
 
+bool AudacityApp::OnExceptionInMainLoop()
+{
+   // This function is invoked from catch blocks in the wxWidgets framework,
+   // and throw; without argument re-throws the exception being handled,
+   // letting us dispatch according to its type.
+
+   try { throw; }
+   catch ( AudacityException &e ) {
+      // Here is the catch-all for our own exceptions
+
+      // Use CallAfter to delay this to the next pass of the event loop,
+      // rather than risk doing it inside stack unwinding.
+      auto pProject = ::GetActiveProject();
+      std::shared_ptr< AudacityException > pException { e.Move().release() };
+      CallAfter( [=]      // Capture pException by value!
+      {
+
+         // Restore the state of the project to what it was before the
+         // failed operation
+         pProject->RollbackState();
+
+         pProject->RedrawProject();
+
+         // Give the user an alert
+         pException->DelayedHandlerAction();
+
+      } );
+
+      // Don't quit the program
+      return true;
+   }
+   catch ( ... ) {
+      // There was some other type of exception we don't know.
+      // Let the inherited function do throw; again and whatever else it does.
+      return wxApp::OnExceptionInMainLoop();
+   }
+
+   // Shouldn't ever reach this line
+   return false;
+}
+
 #if defined(EXPERIMENTAL_CRASH_REPORT)
 void AudacityApp::GenerateCrashReport(wxDebugReport::Context ctx)
 {
@@ -1101,6 +1111,9 @@ void AudacityApp::GenerateCrashReport(wxDebugReport::Context ctx)
    if (ctx == wxDebugReport::Context_Current)
    {
       rpt.AddText(wxT("audiodev.txt"), gAudioIO->GetDeviceInfo(), wxT("Audio Device Info"));
+#ifdef EXPERIMENTAL_MIDI_OUT
+      rpt.AddText(wxT("mididev.txt"), gAudioIO->GetMidiDeviceInfo(), wxT("MIDI Device Info"));
+#endif
    }
 
    AudacityLogger *logger = GetLogger();
@@ -1200,6 +1213,13 @@ bool AudacityApp::OnInit()
    // JKC: ANSWER-ME: Who actually added the event loop guarantor?
    // Although 'blame' says Leland, I think it came from a donated patch.
 
+   // PRL:  It was added by LL at 54676a72285ba7ee3a69920e91fa390a71ef10c9 :
+   // "   Ensure OnInit() has an event loop
+   //     And allow events to flow so the splash window updates under GTK"
+   // then mistakenly lost in the merge at
+   // 37168ebbf67ae869ab71a3b5cbbf1d2a48e824aa
+   // then restored at 7687972aa4b2199f0717165235f3ef68ade71e08
+
    // Ensure we have an event loop during initialization
    wxEventLoopGuarantor eventLoop;
 
@@ -1220,8 +1240,13 @@ bool AudacityApp::OnInit()
 
    // Don't use AUDACITY_NAME here.
    // We want Audacity with a capital 'A'
-   wxString appName = wxT("Audacity");
 
+// DA: App name
+#ifndef EXPERIMENTAL_DA
+   wxString appName = wxT("Audacity");
+#else
+   wxString appName = wxT("DarkAudacity");
+#endif
 
    wxTheApp->SetAppName(appName);
    // Explicitly set since OSX will use it for the "Quit" menu item
@@ -1252,7 +1277,12 @@ bool AudacityApp::OnInit()
    /* On Unix systems, the default temp dir is in /var/tmp. */
    defaultTempDir.Printf(wxT("/var/tmp/audacity-%s"), wxGetUserId().c_str());
 
+// DA: Path env variable.
+#ifndef EXPERIMENTAL_DA
    wxString pathVar = wxGetenv(wxT("AUDACITY_PATH"));
+#else
+   wxString pathVar = wxGetenv(wxT("DARKAUDACITY_PATH"));
+#endif
    if (pathVar != wxT(""))
       AddMultiPathsToPathList(pathVar, audacityPathList);
    AddUniquePathToPathList(::wxGetCwd(), audacityPathList);
@@ -1437,23 +1467,36 @@ bool AudacityApp::OnInit()
 
    AudacityProject *project;
    {
+      // Bug 718: Position splash screen on same screen 
+      // as where Audacity project will appear.
+      wxRect wndRect;
+      bool bMaximized = false;
+      bool bIconized = false;
+      GetNextWindowPlacement(&wndRect, &bMaximized, &bIconized);
+
       wxSplashScreen temporarywindow(
          logo,
          wxSPLASH_CENTRE_ON_SCREEN | wxSPLASH_NO_TIMEOUT,
          0,
          NULL,
          wxID_ANY,
-         wxDefaultPosition,
+         wndRect.GetTopLeft(),
          wxDefaultSize,
          wxSTAY_ON_TOP);
+      
+      // Unfortunately with the Windows 10 Creators update, the splash screen 
+      // now appears before setting its position.
+      // On a dual monitor screen it will appear on one screen and then 
+      // possibly jump to the second.
+      // We could fix this by writing outr own splash screen and using Hide() 
+      // until the splash scren was correctly positioned, then Show()
+
+      // Possibly move it on to the second screen...
+      temporarywindow.SetPosition( wndRect.GetTopLeft() );
+      // Centered on whichever screen it is on.
+      temporarywindow.Center();
       temporarywindow.SetTitle(_("Audacity is starting up..."));
       SetTopWindow(&temporarywindow);
-
-#ifdef FIX_BUG1567
-      // Without this, splash screen may be hidden under other programs.
-      if (IsSierraOrLater())
-         MacActivateApp();
-#endif
 
       // ANSWER-ME: Why is YieldFor needed at all?
       //wxEventLoopBase::GetActive()->YieldFor(wxEVT_CATEGORY_UI|wxEVT_CATEGORY_USER_INPUT|wxEVT_CATEGORY_UNKNOWN);
@@ -1569,7 +1612,9 @@ bool AudacityApp::OnInit()
 #if !defined(__WXMAC__)
          for (size_t i = 0, cnt = parser->GetParamCount(); i < cnt; i++)
          {
-            MRUOpen(parser->GetParam(i));
+            // PRL: Catch any exceptions, don't try this file again, continue to
+            // other files.
+            SafeMRUOpen(parser->GetParam(i));
          }
 #endif
       }

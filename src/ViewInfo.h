@@ -14,6 +14,7 @@
 #include <vector>
 #include <wx/event.h>
 #include "SelectedRegion.h"
+#include "MemoryX.h"
 
 
 class Track;
@@ -157,8 +158,6 @@ public:
 
    // Scroll info
 
-   Track *track;                // first visible track
-
    double total;                // total width in secs
    // Current horizontal scroll bar positions, in pixels
    wxInt64 sbarH;
@@ -180,12 +179,13 @@ public:
    bool bUpdateTrackIndicator;
 
    bool bScrollBeyondZero;
+   bool bAdjustSelectionEdges;
 
    // During timer update, grab the volatile stream time just once, so that
    // various other drawing code can use the exact same value.
    double mRecentStreamTime;
 
-   void WriteXMLAttributes(XMLWriter &xmlFile);
+   void WriteXMLAttributes(XMLWriter &xmlFile) const;
    bool ReadXMLAttribute(const wxChar *attr, const wxChar *value);
 
    // Receive track panel timer notifications

@@ -29,7 +29,8 @@ class QualityPrefs final : public PrefsPanel
    QualityPrefs(wxWindow * parent);
    virtual ~QualityPrefs();
 
-   bool Apply() override;
+   bool Commit() override;
+   wxString HelpPageName() override;
 
  private:
    void Populate();

@@ -129,8 +129,8 @@ class AUDACITY_DLL_API Ruler {
    // If this is the case, you should provide a wxString array of labels, start
    // label position, and labels step. The range eventually specified will be
    // ignored.
-   void SetCustomMajorLabels(wxArrayString *label, int numLabel, int start, int step);
-   void SetCustomMinorLabels(wxArrayString *label, int numLabel, int start, int step);
+   void SetCustomMajorLabels(wxArrayString *label, size_t numLabel, int start, int step);
+   void SetCustomMinorLabels(wxArrayString *label, size_t numLabel, int start, int step);
 
    void SetUseZoomInfo(int leftOffset, const ZoomInfo *zoomInfo);
 
@@ -171,7 +171,7 @@ public:
    wxRect mRect;
 
 private:
-   static wxColour mTickColour;
+   wxColour mTickColour;
    wxPen mPen;
 
    int          mMaxWidth, mMaxHeight;
@@ -191,8 +191,8 @@ private:
 
    int          mDigits;
 
-   int         *mUserBits;
-   int         *mBits;
+   ArrayOf<int> mUserBits;
+   ArrayOf<int> mBits;
    int          mUserBitLen;
 
    bool         mValid;
@@ -204,15 +204,15 @@ private:
       int lx, ly;
       wxString text;
 
-      void Draw(wxDC &dc, bool twoTone) const;
+      void Draw(wxDC &dc, bool twoTone, wxColour c) const;
    };
 
    int          mNumMajor;
-   Label       *mMajorLabels;
+   ArrayOf<Label> mMajorLabels;
    int          mNumMinor;
-   Label       *mMinorLabels;
+   ArrayOf<Label> mMinorLabels;
    int          mNumMinorMinor;
-   Label       *mMinorMinorLabels;
+   ArrayOf<Label> mMinorMinorLabels;
 
    // Returns 'zero' label coordinate (for grid drawing)
    int FindZero(Label * label, int len);
@@ -258,6 +258,7 @@ class AUDACITY_DLL_API RulerPanel final : public wxPanelWrapper {
    void OnErase(wxEraseEvent &evt);
    void OnPaint(wxPaintEvent &evt);
    void OnSize(wxSizeEvent &evt);
+   void SetTickColour( wxColour & c){ ruler.SetTickColour( c );}
 
    // We don't need or want to accept focus.
    bool AcceptsFocus() const { return false; }
@@ -400,6 +401,7 @@ private:
 
 
    double mIndTime;
+   double mQuickPlayPosUnsnapped;
    double mQuickPlayPos;
 
    std::unique_ptr<SnapManager> mSnapManager;
@@ -443,6 +445,7 @@ private:
    };
 
    MouseEventState mMouseEventState;
+   double mLeftDownClickUnsnapped;  // click position in seconds, before snap
    double mLeftDownClick;  // click position in seconds
    int mLastMouseX;  // Pixel position
    bool mIsDragging;

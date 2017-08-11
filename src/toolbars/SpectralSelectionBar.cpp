@@ -51,8 +51,8 @@ with changes in the SpectralSelectionBar.
 #include "SpectralSelectionBarListener.h"
 #include "SpectralSelectionBar.h"
 
-#include "../AudacityApp.h"
 #include "../Prefs.h"
+#include "../AllThemeResources.h"
 #include "../SelectedRegion.h"
 #include "../widgets/NumericTextCtrl.h"
 
@@ -107,6 +107,7 @@ void SpectralSelectionBar::Create(wxWindow * parent)
 
 void SpectralSelectionBar::Populate()
 {
+   SetBackgroundColour( theTheme.Colour( clrMedium  ) );
    gPrefs->Read(preferencePath, &mbCenterAndWidth, true);
 
    // This will be inherited by all children:
@@ -132,7 +133,7 @@ void SpectralSelectionBar::Populate()
       : wxString(wxEmptyString);
 
    wxFlexGridSizer *mainSizer;
-   Add((mainSizer = safenew wxFlexGridSizer(1, 1, 1)), 0, wxALIGN_CENTER_VERTICAL);
+   Add((mainSizer = safenew wxFlexGridSizer(1, 1, 1)), 0,wxALIGN_TOP | wxLEFT | wxTOP, 5);
 
    //
    // Top row, choice box
@@ -146,7 +147,15 @@ void SpectralSelectionBar::Populate()
       (this, OnChoiceID, wxDefaultPosition, wxDefaultSize, 2, choices,
        0, wxDefaultValidator, _("Spectral Selection"));
    mChoice->SetSelection(mbCenterAndWidth ? 0 : 1);
-   mainSizer->Add(mChoice, 0, wxALIGN_CENTER_VERTICAL | wxEXPAND, 5);
+#ifdef __WXGTK__
+   // Combo boxes are taller on Linux, and if we don't do the following, the selection toolbar will
+   // be three units high.
+   wxSize sz = mChoice->GetBestSize();
+   sz.SetHeight( sz.y-4);
+   mChoice->SetMinSize( sz );
+#endif
+
+   mainSizer->Add(mChoice, 0, wxALIGN_TOP | wxEXPAND |wxRIGHT, 6);
 
    //
    // Bottom row, split into two columns, each with one control
@@ -167,7 +176,7 @@ void SpectralSelectionBar::Populate()
       mWidthCtrl->SetInvalidValue(-1.0);
       mWidthCtrl->SetName(wxString(_("Bandwidth:")));
       mWidthCtrl->EnableMenu();
-      subSizer->Add(mWidthCtrl, 0, wxALIGN_CENTER_VERTICAL | wxRIGHT, 0);
+      subSizer->Add(mWidthCtrl, 0, wxALIGN_CENTER_VERTICAL | wxRIGHT, 5);
 
       mLowCtrl = safenew NumericTextCtrl(
          NumericConverter::FREQUENCY, this, OnLowID, frequencyFormatName, 0.0);
@@ -181,14 +190,14 @@ void SpectralSelectionBar::Populate()
       mHighCtrl->SetInvalidValue(SelectedRegion::UndefinedFrequency);
       mHighCtrl->SetName(wxString(_("High Frequency:")));
       mHighCtrl->EnableMenu();
-      subSizer->Add(mHighCtrl, 0, wxALIGN_CENTER_VERTICAL | wxRIGHT, 0);
+      subSizer->Add(mHighCtrl, 0, wxALIGN_CENTER_VERTICAL | wxRIGHT, 5);
 
       mCenterCtrl->Show(mbCenterAndWidth);
       mWidthCtrl->Show(mbCenterAndWidth);
       mLowCtrl->Show(!mbCenterAndWidth);
       mHighCtrl->Show(!mbCenterAndWidth);
 
-      mainSizer->Add(subSizer.release(), 0, wxALIGN_CENTER_VERTICAL | wxRIGHT, 0);
+      mainSizer->Add(subSizer.release(), 0, wxALIGN_CENTER_VERTICAL, 0);
    }
 
    mainSizer->Layout();
@@ -375,7 +384,13 @@ void SpectralSelectionBar::ValuesToControls()
       mWidthCtrl->SetValue(mWidth);
    }
    else {
-      SetBounds();
+      //Bug 1633
+      //The controls may not be able to show mHigh, e.g.
+      //if set to Hz, and in that case we should either show invalid
+      //or 'do the best we can' and truncate.  
+      //If we set bounds we instead clip to the mHigh to mLow, 
+      //So no SetBounds, for now.
+      //SetBounds();
       mLowCtrl->SetValue(mLow);
       mHighCtrl->SetValue(mHigh);
    }

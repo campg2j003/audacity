@@ -45,6 +45,7 @@ public:
 
    wxString GetSymbol() override;
    wxString GetDescription() override;
+   wxString ManualPage() override;
 
    // EffectIdentInterface implementation
 
@@ -100,7 +101,7 @@ private:
    int mFilterSubtype;	// lowpass, highpass
    int mOrder;
    int mOrderIndex;
-   BiquadStruct *mpBiquad;
+   ArrayOf<BiquadStruct> mpBiquad;
 
    double mdBMax;
    double mdBMin;

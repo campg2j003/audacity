@@ -21,7 +21,9 @@
       
 **********************************************************************/
 
+#include "../../Audacity.h"
 #include "VSTControl.h"
+#include "../../MemoryX.h"
 
 @interface VSTView : NSView
 {
@@ -64,6 +66,11 @@ VSTControl::VSTControl()
 
 VSTControl::~VSTControl()
 {
+   Close();
+}
+
+void VSTControl::Close()
+{
 #if !defined(_LP64)
    if (mWindowRef)
    {
@@ -90,7 +97,8 @@ bool VSTControl::Create(wxWindow *parent, VSTEffectLink *link)
    [mVSTView init];
    [mVSTView retain];
 
-   SetPeer(new VSTControlImpl(this, mVSTView));
+   // wxWidgets takes ownership so safenew
+   SetPeer(safenew VSTControlImpl(this, mVSTView));
 
    CreateCocoa();
 

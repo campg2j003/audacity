@@ -35,7 +35,6 @@
 
 #include "audacity/EffectInterface.h"
 
-#include "AudacityApp.h"
 #include "FileNames.h"
 #include "ModuleManager.h"
 #include "PlatformCompatibility.h"
@@ -981,8 +980,8 @@ void PluginRegistrationDialog::OnOK(wxCommandEvent & WXUNUSED(evt))
          if (item.state == STATE_Enabled && item.plugs[0]->GetPluginType() == PluginTypeStub)
          {
             last3 = last3.AfterFirst(wxT('\n')) + item.path + wxT("\n");
-            int status = progress.Update(++i, enableCount, wxString::Format(_("Enabling effect:\n\n%s"), last3.c_str()));
-            if (!status)
+            auto status = progress.Update(++i, enableCount, wxString::Format(_("Enabling effect:\n\n%s"), last3.c_str()));
+            if (status == ProgressResult::Cancelled)
             {
                break;
             }
@@ -1771,6 +1770,40 @@ void PluginManager::Load()
 
 void PluginManager::LoadGroup(wxFileConfig *pRegistry, PluginType type)
 {
+#ifdef __WXMAC__
+   // Bug 1590: On Mac, we should purge the registry of Nyquist plug-ins
+   // bundled with other versions of Audacity, assuming both versions
+   // were properly installed in /Applications (or whatever it is called in
+   // your locale)
+
+   const auto fullExePath = PlatformCompatibility::GetExecutablePath();
+
+   // Strip rightmost path components up to *.app
+   wxFileName exeFn{ fullExePath };
+   exeFn.SetEmptyExt();
+   exeFn.SetName(wxString{});
+   while(exeFn.GetDirCount() && !exeFn.GetDirs().Last().EndsWith(".app"))
+      exeFn.RemoveLastDir();
+
+   const auto goodPath = exeFn.GetPath();
+
+   if(exeFn.GetDirCount())
+      exeFn.RemoveLastDir();
+   const auto possiblyBadPath = exeFn.GetPath();
+
+   auto AcceptPath = [&](const wxString &path) {
+      if (!path.StartsWith(possiblyBadPath))
+         // Assume it's not under /Applications
+         return true;
+      if (path.StartsWith(goodPath))
+         // It's bundled with this executable
+         return true;
+      return false;
+   };
+#else
+   auto AcceptPath = [](const wxString&){ return true; };
+#endif
+
    wxString strVal;
    bool boolVal;
    wxString groupName;
@@ -1815,6 +1848,11 @@ void PluginManager::LoadGroup(wxFileConfig *pRegistry, PluginType type)
 
       // Get the path (optional)
       pRegistry->Read(KEY_PATH, &strVal, wxEmptyString);
+      if (!AcceptPath(strVal))
+         // Ignore the obsolete path in the config file, during session,
+         // but don't remove it from the file.  Maybe you really want to
+         // switch back to the other version of Audacity and lose nothing.
+         continue;
       plug.SetPath(strVal);
 
       // Get the name and bypass group if not found
@@ -2795,9 +2833,8 @@ wxString PluginManager::ConvertID(const PluginID & ID)
    if (ID.StartsWith(wxT("base64:")))
    {
       wxString id = ID.Mid(7);
-      char *buf = new char[id.Length() / 4 * 3];
-      id =  wxString::FromUTF8(buf, b64decode(id, buf));
-      delete [] buf;
+      ArrayOf<char> buf{ id.Length() / 4 * 3 };
+      id =  wxString::FromUTF8(buf.get(), b64decode(id, buf.get()));
       return id;
    }
 
