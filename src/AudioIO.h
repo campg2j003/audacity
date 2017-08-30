@@ -93,6 +93,19 @@ DECLARE_EXPORTED_EVENT_TYPE(AUDACITY_DLL_API, EVT_AUDIOIO_PLAYBACK, -1);
 DECLARE_EXPORTED_EVENT_TYPE(AUDACITY_DLL_API, EVT_AUDIOIO_CAPTURE, -1);
 DECLARE_EXPORTED_EVENT_TYPE(AUDACITY_DLL_API, EVT_AUDIOIO_MONITOR, -1);
 
+// If we always run a portaudio output stream (even just to produce silence)
+// whenever we play Midi, then we can use just one thread for both, which
+// simplifies synchronization problems and avoids the rush of notes at start of
+// play.  PRL.
+#undef USE_MIDI_THREAD
+
+// Whether we trust all of the time info passed to audacityAudioCallback
+#ifdef __WXGTK__
+   #undef USE_TIME_INFO
+#else
+   #define USE_TIME_INFO
+#endif
+
 struct ScrubbingOptions;
 
 // To avoid growing the argument list of StartStream, add fields here
@@ -437,6 +450,11 @@ private:
 #ifdef EXPERIMENTAL_MIDI_OUT
    void PrepareMidiIterator(bool send = true, double offset = 0);
    bool StartPortMidiStream();
+
+   // Compute nondecreasing time stamps, accounting for pauses, but not the
+   // synth latency.
+   double UncorrectedMidiEventTime();
+
    void OutputEvent();
    void FillMidiBuffers();
    void GetNextEvent();
@@ -523,21 +541,34 @@ private:
    //   MIDI_PLAYBACK:
    PmStream        *mMidiStream;
    PmError          mLastPmError;
-   /// Latency value for PortMidi
-   long             mMidiLatency;
+
+#ifndef USE_TIME_INFO
+   PaTime           mMidiTimeCorrection; // seconds
+#endif
+
    /// Latency of MIDI synthesizer
-   long             mSynthLatency;
+   long             mSynthLatency; // ms
 
    // These fields are used to synchronize MIDI with audio:
 
+   /// PortAudio's clock time
+   volatile double  mAudioCallbackClockTime;
+
+#ifdef USE_TIME_INFO
+   /// PortAudio's currentTime -- its origin is unspecified!
+   volatile double  mAudioCallbackOutputCurrentTime;
    /// PortAudio's outTime
-   volatile double  mAudioCallbackOutputTime;
+   volatile double  mAudioCallbackOutputDacTime;
+#endif
+
    /// Number of frames output, including pauses
    volatile long    mNumFrames;
    /// How many frames of zeros were output due to pauses?
    volatile long    mNumPauseFrames;
    /// total of backward jumps
-   volatile double  mMidiLoopOffset;
+   volatile int     mMidiLoopPasses;
+   inline double MidiLoopOffset() { return mMidiLoopPasses * (mT1 - mT0); }
+
    volatile long    mAudioFramesPerBuffer;
    /// Used by Midi process to record that pause has begun,
    /// so that AllNotesOff() is only delivered once
@@ -558,7 +589,7 @@ private:
    /// Track of next event
    NoteTrack        *mNextEventTrack;
    /// True when output reaches mT1
-   bool             mMidiOutputComplete;
+   bool             mMidiOutputComplete{ true };
    /// Is the next event a note-on?
    bool             mNextIsNoteOn;
    /// mMidiStreamActive tells when mMidiStream is open for output
@@ -588,7 +619,9 @@ private:
 
    std::unique_ptr<AudioThread> mThread;
 #ifdef EXPERIMENTAL_MIDI_OUT
+#ifdef USE_MIDI_THREAD
    std::unique_ptr<AudioThread> mMidiThread;
+#endif
 #endif
    ArrayOf<std::unique_ptr<Resample>> mResample;
    ArrayOf<std::unique_ptr<RingBuffer>> mCaptureBuffers;
@@ -608,12 +641,17 @@ private:
    double              mT1;
    /// Current time position during playback, in seconds.  Between mT0 and mT1.
    double              mTime;
-   /// Current time after warping, starting at zero (unlike mTime).
-   /// Length in real seconds between mT0 and mTime.
+
+   /// Accumulated real time (not track position), starting at zero (unlike
+   ///  mTime), and wrapping back to zero each time around looping play.
+   /// Thus, it is the length in real seconds between mT0 and mTime.
    double              mWarpedTime;
-   /// Total length after warping via a time track.
+
+   /// Real length to be played (if looping, for each pass) after warping via a
+   /// time track, computed just once when starting the stream.
    /// Length in real seconds between mT0 and mT1.  Always positive.
    double              mWarpedLength;
+
    double              mSeek;
    double              mPlaybackRingBufferSecs;
    double              mCaptureRingBufferSecs;

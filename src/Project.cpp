@@ -2020,7 +2020,6 @@ std::shared_ptr<Track> AudacityProject::GetFirstVisible()
 {
    std::shared_ptr<Track> pTrack;
    if (GetTracks()) {
-      // Recompute on demand and memo-ize
       TrackListIterator iter(GetTracks());
       for (Track *t = iter.First(); t; t = iter.Next()) {
          int y = t->GetY();
@@ -2041,10 +2040,14 @@ void AudacityProject::UpdateLayout()
    if (!mTrackPanel)
       return;
 
-   // Layout first to get our NEW width,
-   // Then and only then we can arrange the toolbars.
+   // 1. Layout panel, to get widths of the docks.
    Layout();
+   // 2. Layout toolbars to pack the toolbars correctly in docks which 
+   // are now the correct width.
    mToolManager->LayoutToolBars();
+   // 3. Layout panel, to resize docks, in particular reducing the height 
+   // of any empty docks, or increasing the height of docks that need it.
+   Layout();
 
    // Retrieve size of this projects window
    wxSize mainsz = GetSize();

@@ -82,6 +82,9 @@ and in the spectrogram spectral selection.
 
 #include "Experimental.h"
 
+#include "./widgets/LinkingHtmlWindow.h"
+#include "./widgets/HelpSystem.h"
+
 DEFINE_EVENT_TYPE(EVT_FREQWINDOW_RECALC);
 
 enum {
@@ -169,6 +172,7 @@ BEGIN_EVENT_TABLE(FreqWindow, wxDialogWrapper)
    EVT_BUTTON(FreqExportButtonID, FreqWindow::OnExport)
    EVT_BUTTON(ReplotButtonID, FreqWindow::OnReplot)
    EVT_BUTTON(wxID_CANCEL, FreqWindow::OnCloseButton)
+   EVT_BUTTON(wxID_HELP, FreqWindow::OnGetURL)
    EVT_CHECKBOX(GridOnOffID, FreqWindow::OnGridOnOff)
    EVT_COMMAND(wxID_ANY, EVT_FREQWINDOW_RECALC, FreqWindow::OnRecalc)
 END_EVENT_TABLE()
@@ -382,7 +386,7 @@ FreqWindow::FreqWindow(wxWindow * parent, wxWindowID id,
       S.StartHorizontalLay(wxEXPAND);
       {
          S.SetSizerProportion(1);
-         S.StartMultiColumn(4);
+         S.StartMultiColumn(6);
          S.SetStretchyCol(1);
          S.SetStretchyCol(3);
          {
@@ -395,6 +399,10 @@ FreqWindow::FreqWindow(wxWindow * parent, wxWindowID id,
 
             S.SetStyle(wxTE_READONLY);
             mPeakText = S.AddTextBox(wxT(""), wxT(""), 10);
+            S.AddSpace(5);
+
+            mGridOnOff = S.Id(GridOnOffID).AddCheckBox(_("&Grids"), wxT("false"));
+            mGridOnOff->SetValue(mDrawGrid);
          }
          S.EndMultiColumn();
       }
@@ -412,7 +420,7 @@ FreqWindow::FreqWindow(wxWindow * parent, wxWindowID id,
 
    S.SetBorder(2);
    S.SetSizerProportion(0);
-   S.StartMultiColumn(11, wxALIGN_CENTER);
+   S.StartMultiColumn(9, wxALIGN_CENTER);
    {
       // ----------------------------------------------------------------
       // ROW 6: Algorithm, Size, Export, Replot
@@ -436,9 +444,6 @@ FreqWindow::FreqWindow(wxWindow * parent, wxWindowID id,
 
       S.AddSpace(5);
 
-      mReplotButton = S.Id(ReplotButtonID).AddButton(_("&Replot..."));
-
-      S.AddSpace(5);
 
       // ----------------------------------------------------------------
       // ROW 7: Function, Axix, Grids, Close
@@ -460,16 +465,16 @@ FreqWindow::FreqWindow(wxWindow * parent, wxWindowID id,
 
       S.AddSpace(5);
 
-      mGridOnOff = S.Id(GridOnOffID).AddCheckBox(_("&Grids"), wxT("false"));
-      mGridOnOff->SetValue(mDrawGrid);
+      mReplotButton = S.Id(ReplotButtonID).AddButton(_("&Replot..."));
 
       S.AddSpace(5);
 
-      mCloseButton = S.Id(wxID_CANCEL).AddButton(_("&Close"));
+      //mCloseButton = S.Id(wxID_CANCEL).AddButton(_("&Close"));
 
-      S.AddSpace(5);
+      //S.AddSpace(5);
    }
    S.EndMultiColumn();
+   S.AddStandardButtons( eHelpButton | eCloseButton );
 
    // -------------------------------------------------------------------
    // ROW 8: Spacer
@@ -488,6 +493,7 @@ FreqWindow::FreqWindow(wxWindow * parent, wxWindowID id,
    }
    mLogAxis = mAxis != 0;
 
+   mCloseButton = reinterpret_cast<wxButton*>(FindWindowById( wxID_CANCEL ));
    mCloseButton->SetDefault();
    mCloseButton->SetFocus();
 
@@ -518,6 +524,13 @@ FreqWindow::FreqWindow(wxWindow * parent, wxWindowID id,
 
 FreqWindow::~FreqWindow()
 {
+}
+
+void FreqWindow::OnGetURL(wxCommandEvent & WXUNUSED(event))
+{
+   // Original help page is back on-line (March 2016), but the manual should be more reliable.
+   // http://www.eramp.com/WCAG_2_audio_contrast_tool_help.htm
+   HelpSystem::ShowHelp(this, wxT("Plot Spectrum"));
 }
 
 bool FreqWindow::Show(bool show)

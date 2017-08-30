@@ -95,6 +95,7 @@ CommandManager.  It holds the callback for one command.
 #include "../effects/EffectManager.h"
 #include "../widgets/LinkingHtmlWindow.h"
 #include "../widgets/ErrorDialog.h"
+#include "../widgets/HelpSystem.h"
 
 // On wxGTK, there may be many many many plugins, but the menus don't automatically
 // allow for scrolling, so we build sub-menus.  If the menu gets longer than
@@ -1232,12 +1233,14 @@ void CommandManager::TellUserWhyDisallowed( const wxString & Name, CommandFlag f
    wxString reason = _("There was a problem with your last action. If you think\nthis is a bug, please tell us exactly where it occurred.");
    // The default title string is 'Disallowed'.
    wxString title = _("Disallowed");
-   wxString help_url ="";
+   wxString helpPage ="";
 
    auto missingFlags = flagsRequired & (~flagsGot );
    if( missingFlags & AudioIONotBusyFlag )
+      // This reason will not be shown, because options that require it will be greyed our.
       reason = _("You can only do this when playing and recording are\nstopped. (Pausing is not sufficient.)");
    else if( missingFlags & StereoRequiredFlag )
+      // This reason will not be shown, because the stereo-to-mono is greyed out if not allowed.
       reason = _("You must first select some stereo audio to perform this\naction. (You cannot use this with mono.)");
    // In reporting the issue with cut or copy, we don't tell the user they could also select some text in a label.
    else if(( missingFlags & TimeSelectedFlag ) || (missingFlags &CutCopyAvailableFlag )){
@@ -1261,7 +1264,7 @@ void CommandManager::TellUserWhyDisallowed( const wxString & Name, CommandFlag f
       ), Name );
 #endif
 #endif
-      help_url = "http://alphamanual.audacityteam.org/man/Selecting_Audio_-_the_basics";
+      helpPage = "Selecting_Audio_-_the_basics";
    }
    else if( missingFlags & WaveTracksSelectedFlag)
       reason = _("You must first select some audio to perform this action.\n(Selecting other kinds of track won't work.)");
@@ -1275,30 +1278,13 @@ void CommandManager::TellUserWhyDisallowed( const wxString & Name, CommandFlag f
    else if( missingFlags == TrackPanelHasFocus )
       return;
 
-
-#if 0
    // Does not have the warning icon...
    ShowErrorDialog(
       NULL,
       title,
       reason, 
-      help_url,
+      helpPage,
       false);
-#endif
-
-   // JKC: I tried building a custom error dialog with the warning icon, and a 
-   // help button linking to our html (without closing).
-   // In the end I decided it was easier (more portable across different
-   // OS's) to use the stock one.
-   int result = ::wxMessageBox(reason, title,  wxICON_WARNING | wxOK | 
-      (help_url.IsEmpty() ? 0 : wxHELP) );
-   // if they click help, we fetch that help, and pop the dialog (without a
-   // help button) up again.
-   if( result == wxHELP ){
-      wxHtmlLinkInfo link( help_url );
-      OpenInDefaultBrowser(link);
-      ::wxMessageBox(reason, title,  wxICON_WARNING | wxOK );
-   }
 }
 
 wxString CommandManager::DescribeCommandsAndShortcuts
@@ -1383,7 +1369,9 @@ bool CommandManager::FilterKeyEvent(AudacityProject *project, const wxKeyEvent &
          case WXK_RIGHT:
          case WXK_UP:
          case WXK_DOWN:
-         case WXK_SPACE:
+         // Don't trap WXK_SPACE (Bug 1727 - SPACE not starting/stopping playback
+         // when cursor is in a time control)
+         // case WXK_SPACE:
          case WXK_TAB:
          case WXK_BACK:
          case WXK_HOME:
