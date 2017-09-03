@@ -33,10 +33,13 @@
 #endif
 
 
-// We only do alpha builds and release versions.
+// We only do alpha builds, beta builds, and release versions.
 // Most of the time we're in development, so IS_ALPHA should be defined
 // to 1.
-#define IS_ALPHA 1
+// Its value may be more than 1 for pre-release "Beta" builds that differ only in the
+// welcome screen.
+// Use "#if IS_ALPHA" not #ifdef
+#define IS_ALPHA 2
 
 // Increment as appropriate every time we release a NEW version.
 #define AUDACITY_VERSION   2
@@ -44,11 +47,13 @@
 #define AUDACITY_REVISION  0
 #define AUDACITY_MODLEVEL  0
 
-#if IS_ALPHA
+#if IS_ALPHA > 1
+   #define AUDACITY_SUFFIX wxT("-beta-") __TDATE__
+#elif IS_ALPHA
    #define AUDACITY_SUFFIX wxT("-alpha-") __TDATE__
 #else
-   //#define AUDACITY_SUFFIX    wxT("") // for a stable release
-   #define AUDACITY_SUFFIX wxT("x  ") __TDATE__
+   #define AUDACITY_SUFFIX    wxT("") // for a stable release
+   //#define AUDACITY_SUFFIX wxT("x  ") __TDATE__
 #endif
 
 #define AUDACITY_MAKESTR( x ) #x
